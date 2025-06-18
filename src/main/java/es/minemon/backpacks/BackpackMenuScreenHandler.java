@@ -167,10 +167,11 @@ public class BackpackMenuScreenHandler extends GenericContainerScreenHandler {
     }
 
     /**
-     * Verifica si una mochila es VIP
+     * CORREGIDO: Verifica si una mochila es VIP usando configuración dinámica
      */
     private boolean isVipBackpack(String name) {
-        for (VipBackpackManager.VipRank rank : VipBackpackManager.VIP_RANKS.values()) {
+        Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
+        for (VipBackpackManager.VipRank rank : currentRanks.values()) {
             if (name.toLowerCase().startsWith(rank.getId().toLowerCase())) {
                 return true;
             }
@@ -179,10 +180,11 @@ public class BackpackMenuScreenHandler extends GenericContainerScreenHandler {
     }
 
     /**
-     * Obtiene el color VIP basado en el nombre de la mochila
+     * CORREGIDO: Obtiene el color VIP basado en el nombre de la mochila usando configuración dinámica
      */
     private String getVipColor(String name) {
-        for (VipBackpackManager.VipRank rank : VipBackpackManager.VIP_RANKS.values()) {
+        Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
+        for (VipBackpackManager.VipRank rank : currentRanks.values()) {
             if (name.toLowerCase().startsWith(rank.getId().toLowerCase())) {
                 return rank.getPrimaryColor();
             }
@@ -191,10 +193,11 @@ public class BackpackMenuScreenHandler extends GenericContainerScreenHandler {
     }
 
     /**
-     * Obtiene el rango VIP desde el nombre de la mochila
+     * CORREGIDO: Obtiene el rango VIP desde el nombre de la mochila usando configuración dinámica
      */
     private String getVipRankFromName(String name) {
-        for (VipBackpackManager.VipRank rank : VipBackpackManager.VIP_RANKS.values()) {
+        Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
+        for (VipBackpackManager.VipRank rank : currentRanks.values()) {
             if (name.toLowerCase().startsWith(rank.getId().toLowerCase())) {
                 return rank.getDisplayName();
             }
@@ -616,7 +619,8 @@ public class BackpackMenuScreenHandler extends GenericContainerScreenHandler {
             for (MongoBackpackManager.BackpackData backpack : visibleBackpacks.values()) {
                 String name = backpack.getName();
                 boolean isVip = false;
-                for (VipBackpackManager.VipRank rank : VipBackpackManager.VIP_RANKS.values()) {
+                Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
+                for (VipBackpackManager.VipRank rank : currentRanks.values()) {
                     if (name.toLowerCase().startsWith(rank.getId().toLowerCase())) {
                         isVip = true;
                         break;

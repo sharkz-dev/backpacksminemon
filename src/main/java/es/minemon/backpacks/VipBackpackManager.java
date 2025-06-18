@@ -10,7 +10,7 @@ import java.util.*;
 
 /**
  * Gestor de mochilas VIP basadas en permisos - COMPLETAMENTE CUSTOMIZABLE
- * NUEVO: Configuración completa desde config, iconos customizables, nombres personalizados
+ * CORREGIDO: Elimina VIP_RANKS estático y usa configuración dinámica
  */
 public class VipBackpackManager {
 
@@ -74,7 +74,7 @@ public class VipBackpackManager {
     }
 
     /**
-     * Obtiene los rangos VIP actuales desde la configuración
+     * CORREGIDO: Obtiene los rangos VIP actuales desde la configuración
      */
     public static Map<String, VipRank> getCurrentVipRanks() {
         BackpackConfig config = ConfigManager.getConfig();
@@ -101,7 +101,6 @@ public class VipBackpackManager {
 
     /**
      * Actualiza las mochilas VIP de un jugador basándose en sus permisos actuales
-     * CORREGIDO: Verifica límites antes de crear mochilas y usa configuración customizable
      */
     public static void updatePlayerVipBackpacks(ServerPlayerEntity player) {
         UUID playerId = player.getUuid();
@@ -234,7 +233,6 @@ public class VipBackpackManager {
 
     /**
      * Asegura que el jugador tenga todas las mochilas VIP para un rango específico
-     * CORREGIDO: Respeta el límite máximo de mochilas y usa configuración customizable
      */
     private static void ensureVipBackpacks(UUID playerId, VipRank rank, int maxBackpacksAllowed) {
         MongoBackpackManager.PlayerBackpacks playerBackpacks = BackpackManager.getPlayerBackpacks(playerId);
@@ -514,7 +512,7 @@ public class VipBackpackManager {
     }
 
     /**
-     * NUEVO: Obtiene información detallada de las configuraciones VIP actuales
+     * Obtiene información detallada de las configuraciones VIP actuales
      */
     public static String getVipConfigurationSummary() {
         Map<String, VipRank> currentRanks = getCurrentVipRanks();

@@ -80,7 +80,9 @@ public class VipCommands {
         info.append("§6=== VIP Backpack System Information ===\n\n");
         info.append("§eVIP Ranks Available:\n");
 
-        for (Map.Entry<String, VipBackpackManager.VipRank> entry : VipBackpackManager.VIP_RANKS.entrySet()) {
+        // CORREGIDO: Usar getCurrentVipRanks() en lugar de VIP_RANKS estático
+        Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
+        for (Map.Entry<String, VipBackpackManager.VipRank> entry : currentRanks.entrySet()) {
             VipBackpackManager.VipRank rank = entry.getValue();
             info.append("  §7• §f").append(rank.getDisplayName()).append(" §7(").append(entry.getKey()).append(")\n");
             info.append("    §7Backpacks: §a").append(rank.getBackpackCount()).append("\n");
@@ -136,10 +138,12 @@ public class VipCommands {
             int vipCount = 0;
             int normalCount = 0;
 
+            // CORREGIDO: Usar getCurrentVipRanks() para verificar VIP backpacks
+            Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
             for (MongoBackpackManager.BackpackData backpack : visibleBackpacks.values()) {
                 String name = backpack.getName();
                 boolean isVip = false;
-                for (VipBackpackManager.VipRank rank : VipBackpackManager.VIP_RANKS.values()) {
+                for (VipBackpackManager.VipRank rank : currentRanks.values()) {
                     if (name.toLowerCase().startsWith(rank.getId().toLowerCase())) {
                         isVip = true;
                         break;
@@ -190,9 +194,12 @@ public class VipCommands {
                         // Mostrar estado actualizado
                         Map<Integer, MongoBackpackManager.BackpackData> visibleBackpacks = VipBackpackManager.getVisibleBackpacks(targetPlayer);
                         int vipCount = 0;
+
+                        // CORREGIDO: Usar getCurrentVipRanks()
+                        Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
                         for (MongoBackpackManager.BackpackData backpack : visibleBackpacks.values()) {
                             String name = backpack.getName();
-                            for (VipBackpackManager.VipRank rank : VipBackpackManager.VIP_RANKS.values()) {
+                            for (VipBackpackManager.VipRank rank : currentRanks.values()) {
                                 if (name.toLowerCase().startsWith(rank.getId().toLowerCase())) {
                                     vipCount++;
                                     break;
@@ -227,7 +234,8 @@ public class VipCommands {
 
             // Verificar que el rango existe
             String permission = "backpack." + rankName;
-            VipBackpackManager.VipRank rank = VipBackpackManager.VIP_RANKS.get(permission);
+            Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
+            VipBackpackManager.VipRank rank = currentRanks.get(permission);
 
             if (rank == null) {
                 admin.sendMessage(Text.literal("§cInvalid VIP rank: " + rankName), false);
@@ -273,7 +281,8 @@ public class VipCommands {
 
             // Verificar que el rango existe
             String permission = "backpack." + rankName;
-            VipBackpackManager.VipRank rank = VipBackpackManager.VIP_RANKS.get(permission);
+            Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
+            VipBackpackManager.VipRank rank = currentRanks.get(permission);
 
             if (rank == null) {
                 admin.sendMessage(Text.literal("§cInvalid VIP rank: " + rankName), false);
@@ -312,7 +321,9 @@ public class VipCommands {
         StringBuilder message = new StringBuilder();
         message.append("§6=== VIP Backpack Ranks ===\n\n");
 
-        for (Map.Entry<String, VipBackpackManager.VipRank> entry : VipBackpackManager.VIP_RANKS.entrySet()) {
+        // CORREGIDO: Usar getCurrentVipRanks()
+        Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
+        for (Map.Entry<String, VipBackpackManager.VipRank> entry : currentRanks.entrySet()) {
             VipBackpackManager.VipRank rank = entry.getValue();
             String permission = entry.getKey();
 
@@ -349,15 +360,16 @@ public class VipCommands {
         stats.append("§6=== VIP System Statistics ===\n\n");
 
         // Estadísticas del sistema
+        Map<String, VipBackpackManager.VipRank> currentRanks = VipBackpackManager.getCurrentVipRanks();
         stats.append("§eSystem Information:\n");
-        stats.append("  §7• Total VIP ranks: §a").append(VipBackpackManager.VIP_RANKS.size()).append("\n");
+        stats.append("  §7• Total VIP ranks: §a").append(currentRanks.size()).append("\n");
         stats.append("  §7• LuckPerms integration: §a").append(LuckPermsManager.isLuckPermsAvailable() ? "Active" : "Inactive").append("\n");
         stats.append("  §7• Permission system: §a").append(LuckPermsManager.getPermissionSystemInfo()).append("\n");
 
         // Estadísticas de rangos
         stats.append("\n§eRank Distribution:\n");
         int totalVipBackpacks = 0;
-        for (VipBackpackManager.VipRank rank : VipBackpackManager.VIP_RANKS.values()) {
+        for (VipBackpackManager.VipRank rank : currentRanks.values()) {
             totalVipBackpacks += rank.getBackpackCount();
             stats.append("  §7• ").append(rank.getDisplayName()).append(": §6").append(rank.getBackpackCount()).append(" §7backpacks each\n");
         }
