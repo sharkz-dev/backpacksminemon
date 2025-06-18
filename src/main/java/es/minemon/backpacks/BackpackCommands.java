@@ -29,16 +29,27 @@ public class BackpackCommands {
                 })
                 .executes(BackpackCommands::openBackpackMenu));
 
-        // Comandos administrativos (SOLO para jugadores online con permisos)
+        // Comandos administrativos (CONSOLA + JUGADORES con permisos)
         dispatcher.register(CommandManager.literal(mainCommand)
                 .requires(source -> {
-                    if (!(source.getEntity() instanceof ServerPlayerEntity player)) return false;
-                    return LuckPermsManager.isAdmin(player);
+                    // Permitir desde consola (source.getEntity() == null)
+                    if (source.getEntity() == null) {
+                        return true; // Consola siempre tiene permisos
+                    }
+                    // Para jugadores, verificar permisos
+                    if (source.getEntity() instanceof ServerPlayerEntity player) {
+                        return LuckPermsManager.isAdmin(player);
+                    }
+                    return false;
                 })
                 .then(CommandManager.literal("give")
                         .requires(source -> {
-                            if (!(source.getEntity() instanceof ServerPlayerEntity player)) return false;
-                            return LuckPermsManager.canGiveBackpacks(player);
+                            // Consola siempre puede dar mochilas
+                            if (source.getEntity() == null) return true;
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canGiveBackpacks(player);
+                            }
+                            return false;
                         })
                         .then(CommandManager.argument("player", EntityArgumentType.player())
                                 .then(CommandManager.argument("name", StringArgumentType.string())
@@ -46,16 +57,23 @@ public class BackpackCommands {
                                                 .executes(BackpackCommands::giveBackpack)))))
                 .then(CommandManager.literal("remove")
                         .requires(source -> {
-                            if (!(source.getEntity() instanceof ServerPlayerEntity player)) return false;
-                            return LuckPermsManager.canRemoveBackpacks(player);
+                            // Consola siempre puede remover mochilas
+                            if (source.getEntity() == null) return true;
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canRemoveBackpacks(player);
+                            }
+                            return false;
                         })
                         .then(CommandManager.argument("player", EntityArgumentType.player())
                                 .then(CommandManager.argument("id", IntegerArgumentType.integer(0))
                                         .executes(BackpackCommands::removeBackpack))))
                 .then(CommandManager.literal("rename")
                         .requires(source -> {
-                            if (!(source.getEntity() instanceof ServerPlayerEntity player)) return false;
-                            return LuckPermsManager.canAdminRename(player);
+                            if (source.getEntity() == null) return true; // Consola
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canAdminRename(player);
+                            }
+                            return false;
                         })
                         .then(CommandManager.argument("player", EntityArgumentType.player())
                                 .then(CommandManager.argument("id", IntegerArgumentType.integer(0))
@@ -63,20 +81,27 @@ public class BackpackCommands {
                                                 .executes(BackpackCommands::adminRenameBackpack)))))
                 .then(CommandManager.literal("info")
                         .requires(source -> {
-                            if (!(source.getEntity() instanceof ServerPlayerEntity player)) return false;
-                            return LuckPermsManager.canViewOthers(player);
+                            if (source.getEntity() == null) return true; // Consola
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canViewOthers(player);
+                            }
+                            return false;
                         })
                         .then(CommandManager.argument("player", EntityArgumentType.player())
                                 .executes(BackpackCommands::showPlayerInfo)))
                 .then(CommandManager.literal("sync")
                         .requires(source -> {
-                            if (!(source.getEntity() instanceof ServerPlayerEntity player)) return false;
-                            return LuckPermsManager.canSync(player);
+                            if (source.getEntity() == null) return true; // Consola
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canSync(player);
+                            }
+                            return false;
                         })
                         .then(CommandManager.argument("player", EntityArgumentType.player())
                                 .executes(BackpackCommands::syncPlayerData)))
                 .then(CommandManager.literal("admin")
                         .requires(source -> {
+                            // Solo jugadores para vista admin (requiere GUI)
                             if (!(source.getEntity() instanceof ServerPlayerEntity player)) return false;
                             return LuckPermsManager.canViewOthers(player);
                         })
@@ -85,8 +110,11 @@ public class BackpackCommands {
                                         .executes(BackpackCommands::openAdminView))))
                 .then(CommandManager.literal("backup")
                         .requires(source -> {
-                            if (!(source.getEntity() instanceof ServerPlayerEntity player)) return false;
-                            return LuckPermsManager.canManageBackups(player);
+                            if (source.getEntity() == null) return true; // Consola
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canManageBackups(player);
+                            }
+                            return false;
                         })
                         .then(CommandManager.literal("create")
                                 .then(CommandManager.argument("reason", StringArgumentType.greedyString())
@@ -97,8 +125,11 @@ public class BackpackCommands {
                                 .executes(BackpackCommands::forceBackupAll)))
                 .then(CommandManager.literal("permissions")
                         .requires(source -> {
-                            if (!(source.getEntity() instanceof ServerPlayerEntity player)) return false;
-                            return LuckPermsManager.canModifyConfig(player);
+                            if (source.getEntity() == null) return true; // Consola
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canModifyConfig(player);
+                            }
+                            return false;
                         })
                         .then(CommandManager.literal("info")
                                 .executes(BackpackCommands::showPermissionInfo))
@@ -106,7 +137,27 @@ public class BackpackCommands {
                                 .executes(BackpackCommands::reloadPermissions))
                         .then(CommandManager.literal("check")
                                 .then(CommandManager.argument("player", EntityArgumentType.player())
-                                        .executes(BackpackCommands::checkPlayerPermissions)))));
+                                        .executes(BackpackCommands::checkPlayerPermissions))))
+                // NUEVO: Comando para listar todos los jugadores con mochilas (útil para consola)
+                .then(CommandManager.literal("list")
+                        .requires(source -> {
+                            if (source.getEntity() == null) return true; // Consola
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canViewOthers(player);
+                            }
+                            return false;
+                        })
+                        .executes(BackpackCommands::listAllPlayers))
+                // NUEVO: Estadísticas del servidor
+                .then(CommandManager.literal("stats")
+                        .requires(source -> {
+                            if (source.getEntity() == null) return true; // Consola
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canViewOthers(player);
+                            }
+                            return false;
+                        })
+                        .executes(BackpackCommands::showServerStats)));
 
         // Comando para jugadores - Renombrar sus propias mochilas
         dispatcher.register(CommandManager.literal("rename-backpack")
@@ -121,7 +172,7 @@ public class BackpackCommands {
 
     private static int openBackpackMenu(CommandContext<ServerCommandSource> context) {
         if (!(context.getSource().getEntity() instanceof ServerPlayerEntity player)) {
-            LanguageManager.sendFeedback(context.getSource(), "errorPlayerOnly", false);
+            sendConsoleMessage(context.getSource(), "errorPlayerOnly");
             return 0;
         }
 
@@ -142,17 +193,6 @@ public class BackpackCommands {
     }
 
     private static int giveBackpack(CommandContext<ServerCommandSource> context) {
-        if (!(context.getSource().getEntity() instanceof ServerPlayerEntity admin)) {
-            LanguageManager.sendFeedback(context.getSource(), "errorPlayerOnly", false);
-            return 0;
-        }
-
-        // Verificar permisos
-        if (!LuckPermsManager.canGiveBackpacks(admin)) {
-            LuckPermsManager.sendNoPermissionMessage(admin, LuckPermsManager.ADMIN_GIVE_PERMISSION);
-            return 0;
-        }
-
         try {
             ServerPlayerEntity targetPlayer = EntityArgumentType.getPlayer(context, "player");
             String name = StringArgumentType.getString(context, "name");
@@ -160,7 +200,7 @@ public class BackpackCommands {
 
             // Validar slots
             if (slots % 9 != 0) {
-                LanguageManager.sendFeedback(context.getSource(), "commandSlotCountInvalid", false);
+                sendFeedback(context.getSource(), "commandSlotCountInvalid", false);
                 return 0;
             }
 
@@ -169,34 +209,36 @@ public class BackpackCommands {
 
             BackpackManager.addBackpack(targetPlayer.getUuid(), newId, name, slots);
 
-            String adminMessage = String.format("§aBackpack '%s' (ID: %d) given to %s with %d slots",
-                    name, newId, targetPlayer.getName().getString(), slots);
-            context.getSource().sendFeedback(() -> Text.literal(adminMessage), true);
+            // Mensaje diferente para consola vs jugador
+            if (isConsole(context.getSource())) {
+                String consoleMessage = String.format("[CONSOLE] Backpack '%s' (ID: %d) given to %s with %d slots",
+                        name, newId, targetPlayer.getName().getString(), slots);
+                context.getSource().sendFeedback(() -> Text.literal(consoleMessage), true);
 
+                // Log adicional para consola
+                BackpacksMod.LOGGER.info("Console gave backpack '{}' (ID: {}) to {} with {} slots",
+                        name, newId, targetPlayer.getName().getString(), slots);
+            } else {
+                String adminMessage = String.format("§aBackpack '%s' (ID: %d) given to %s with %d slots",
+                        name, newId, targetPlayer.getName().getString(), slots);
+                context.getSource().sendFeedback(() -> Text.literal(adminMessage), true);
+            }
+
+            // Notificar al jugador objetivo
             LanguageManager.sendMessage(targetPlayer, "backpackReceived",
                     String.format("%s (ID: %d, Slots: %d)", name, newId, slots));
 
+            // Log para auditoría
+            logGiveBackpack(context.getSource(), targetPlayer.getName().getString(), name, newId, slots);
+
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
             return 0;
         }
     }
 
     private static int removeBackpack(CommandContext<ServerCommandSource> context) {
-        if (!(context.getSource().getEntity() instanceof ServerPlayerEntity admin)) {
-            LanguageManager.sendFeedback(context.getSource(), "errorPlayerOnly", false);
-            return 0;
-        }
-
-        // Verificar permisos
-        if (!LuckPermsManager.canRemoveBackpacks(admin)) {
-            LuckPermsManager.sendNoPermissionMessage(admin, LuckPermsManager.ADMIN_REMOVE_PERMISSION);
-            return 0;
-        }
-
         try {
             ServerPlayerEntity targetPlayer = EntityArgumentType.getPlayer(context, "player");
             int id = IntegerArgumentType.getInteger(context, "id");
@@ -204,9 +246,13 @@ public class BackpackCommands {
             MongoBackpackManager.PlayerBackpacks backpacks = BackpackManager.getPlayerBackpacks(targetPlayer.getUuid());
 
             if (!backpacks.hasBackpack(id)) {
-                LanguageManager.sendFeedback(context.getSource(), "errorBackpackNotFound", false);
+                sendFeedback(context.getSource(), "errorBackpackNotFound", false);
                 return 0;
             }
+
+            // Obtener información de la mochila antes de eliminarla
+            MongoBackpackManager.BackpackData backpackData = backpacks.getBackpack(id);
+            String backpackName = backpackData != null ? backpackData.getName() : "Unknown";
 
             // Crear backup antes de eliminar si está habilitado
             if (ConfigManager.isFeatureEnabled("backup")) {
@@ -215,33 +261,35 @@ public class BackpackCommands {
 
             BackpackManager.removeBackpack(targetPlayer.getUuid(), id);
 
-            String adminMessage = String.format("§aBackpack ID %d removed from %s",
-                    id, targetPlayer.getName().getString());
-            context.getSource().sendFeedback(() -> Text.literal(adminMessage), true);
+            // Mensaje diferente para consola vs jugador
+            if (isConsole(context.getSource())) {
+                String consoleMessage = String.format("[CONSOLE] Backpack '%s' (ID: %d) removed from %s",
+                        backpackName, id, targetPlayer.getName().getString());
+                context.getSource().sendFeedback(() -> Text.literal(consoleMessage), true);
 
+                // Log adicional para consola
+                BackpacksMod.LOGGER.info("Console removed backpack '{}' (ID: {}) from {}",
+                        backpackName, id, targetPlayer.getName().getString());
+            } else {
+                String adminMessage = String.format("§aBackpack '%s' (ID: %d) removed from %s",
+                        backpackName, id, targetPlayer.getName().getString());
+                context.getSource().sendFeedback(() -> Text.literal(adminMessage), true);
+            }
+
+            // Notificar al jugador objetivo
             LanguageManager.sendMessage(targetPlayer, "backpackLost", id);
+
+            // Log para auditoría
+            logRemoveBackpack(context.getSource(), targetPlayer.getName().getString(), backpackName, id);
 
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
             return 0;
         }
     }
 
     private static int adminRenameBackpack(CommandContext<ServerCommandSource> context) {
-        if (!(context.getSource().getEntity() instanceof ServerPlayerEntity admin)) {
-            LanguageManager.sendFeedback(context.getSource(), "errorPlayerOnly", false);
-            return 0;
-        }
-
-        // Verificar permisos
-        if (!LuckPermsManager.canAdminRename(admin)) {
-            LuckPermsManager.sendNoPermissionMessage(admin, LuckPermsManager.ADMIN_RENAME_PERMISSION);
-            return 0;
-        }
-
         try {
             ServerPlayerEntity targetPlayer = EntityArgumentType.getPlayer(context, "player");
             int id = IntegerArgumentType.getInteger(context, "id");
@@ -249,50 +297,64 @@ public class BackpackCommands {
 
             // Validar nombre
             if (newName.trim().isEmpty()) {
-                LanguageManager.sendFeedback(context.getSource(), "commandNameEmpty", false);
+                sendFeedback(context.getSource(), "commandNameEmpty", false);
                 return 0;
             }
 
             if (newName.length() > 50) {
-                LanguageManager.sendFeedback(context.getSource(), "commandNameTooLong", false);
+                sendFeedback(context.getSource(), "commandNameTooLong", false);
                 return 0;
             }
 
             // Verificar que la mochila existe
             MongoBackpackManager.BackpackData backpack = BackpackManager.getBackpack(targetPlayer.getUuid(), id);
             if (backpack == null) {
-                LanguageManager.sendFeedback(context.getSource(), "errorBackpackNotFound", false);
+                sendFeedback(context.getSource(), "errorBackpackNotFound", false);
                 return 0;
             }
 
+            String oldName = backpack.getName();
             boolean success = BackpackManager.renameBackpack(targetPlayer.getUuid(), id, newName.trim());
 
             if (success) {
-                String adminMessage = String.format("§aBackpack ID %d of %s renamed to: §f%s",
-                        id, targetPlayer.getName().getString(), newName.trim());
-                context.getSource().sendFeedback(() -> Text.literal(adminMessage), true);
+                // Mensaje diferente para consola vs jugador
+                if (isConsole(context.getSource())) {
+                    String consoleMessage = String.format("[CONSOLE] Backpack ID %d of %s renamed from '%s' to '%s'",
+                            id, targetPlayer.getName().getString(), oldName, newName.trim());
+                    context.getSource().sendFeedback(() -> Text.literal(consoleMessage), true);
 
+                    // Log adicional para consola
+                    BackpacksMod.LOGGER.info("Console renamed backpack ID {} of {} from '{}' to '{}'",
+                            id, targetPlayer.getName().getString(), oldName, newName.trim());
+                } else {
+                    String adminMessage = String.format("§aBackpack ID %d of %s renamed to: §f%s",
+                            id, targetPlayer.getName().getString(), newName.trim());
+                    context.getSource().sendFeedback(() -> Text.literal(adminMessage), true);
+                }
+
+                // Notificar al jugador objetivo
                 String playerMessage = String.format("§aAn administrator renamed your backpack ID %d to: §f%s",
                         id, newName.trim());
                 targetPlayer.sendMessage(Text.literal(playerMessage), false);
 
                 BackpackManager.forcePlayerSave(targetPlayer.getUuid());
+
+                // Log para auditoría
+                logRenameBackpack(context.getSource(), targetPlayer.getName().getString(), id, oldName, newName.trim());
             } else {
-                LanguageManager.sendFeedback(context.getSource(), "errorRenamingBackpack", false);
+                sendFeedback(context.getSource(), "errorRenamingBackpack", false);
             }
 
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
             return 0;
         }
     }
 
     private static int openAdminView(CommandContext<ServerCommandSource> context) {
         if (!(context.getSource().getEntity() instanceof ServerPlayerEntity admin)) {
-            LanguageManager.sendFeedback(context.getSource(), "errorPlayerOnly", false);
+            sendConsoleMessage(context.getSource(), "errorPlayerOnly");
             return 0;
         }
 
@@ -314,16 +376,14 @@ public class BackpackCommands {
 
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
             return 0;
         }
     }
 
     private static int playerRenameBackpack(CommandContext<ServerCommandSource> context) {
         if (!(context.getSource().getEntity() instanceof ServerPlayerEntity player)) {
-            LanguageManager.sendFeedback(context.getSource(), "errorPlayerOnly", false);
+            sendConsoleMessage(context.getSource(), "errorPlayerOnly");
             return 0;
         }
 
@@ -372,9 +432,7 @@ public class BackpackCommands {
 
             return success ? 1 : 0;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
             return 0;
         }
     }
@@ -386,20 +444,30 @@ public class BackpackCommands {
             BackpackManager.BackpackStats stats = BackpackManager.getPlayerStats(targetPlayer.getUuid());
 
             StringBuilder message = new StringBuilder();
-            message.append("§6=== ").append(targetPlayer.getName().getString()).append(" Statistics ===\n");
-            message.append("§eTotal backpacks: §a").append(stats.getTotalBackpacks()).append("\n");
-            message.append("§eItems stored: §a").append(stats.getTotalItems()).append("\n");
-            message.append("§eEmpty slots: §a").append(stats.getEmptySlots()).append("\n");
-            message.append("§eTotal slots: §a").append(stats.getTotalSlots()).append("\n");
-            message.append("§eSpace usage: §a").append(String.format("%.1f", stats.getUsagePercentage())).append("%");
+
+            if (isConsole(context.getSource())) {
+                // Formato para consola (sin colores)
+                message.append("=== ").append(targetPlayer.getName().getString()).append(" Statistics ===\n");
+                message.append("Total backpacks: ").append(stats.getTotalBackpacks()).append("\n");
+                message.append("Items stored: ").append(stats.getTotalItems()).append("\n");
+                message.append("Empty slots: ").append(stats.getEmptySlots()).append("\n");
+                message.append("Total slots: ").append(stats.getTotalSlots()).append("\n");
+                message.append("Space usage: ").append(String.format("%.1f", stats.getUsagePercentage())).append("%");
+            } else {
+                // Formato con colores para jugadores
+                message.append("§6=== ").append(targetPlayer.getName().getString()).append(" Statistics ===\n");
+                message.append("§eTotal backpacks: §a").append(stats.getTotalBackpacks()).append("\n");
+                message.append("§eItems stored: §a").append(stats.getTotalItems()).append("\n");
+                message.append("§eEmpty slots: §a").append(stats.getEmptySlots()).append("\n");
+                message.append("§eTotal slots: §a").append(stats.getTotalSlots()).append("\n");
+                message.append("§eSpace usage: §a").append(String.format("%.1f", stats.getUsagePercentage())).append("%");
+            }
 
             context.getSource().sendFeedback(() -> Text.literal(message.toString()), false);
 
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
             return 0;
         }
     }
@@ -408,9 +476,11 @@ public class BackpackCommands {
         try {
             ServerPlayerEntity targetPlayer = EntityArgumentType.getPlayer(context, "player");
 
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§eSynchronizing data..."),
-                    false);
+            String syncMessage = isConsole(context.getSource()) ?
+                    "[CONSOLE] Synchronizing data for " + targetPlayer.getName().getString() + "..." :
+                    "§eSynchronizing data...";
+
+            context.getSource().sendFeedback(() -> Text.literal(syncMessage), false);
 
             BackpackManager.syncPlayerDataFromDatabase(targetPlayer.getUuid()).thenRun(() -> {
                 // Verificar integridad después de la sincronización
@@ -419,26 +489,33 @@ public class BackpackCommands {
                 MongoBackpackManager.PlayerBackpacks backpacks = BackpackManager.getPlayerBackpacks(targetPlayer.getUuid());
                 int backpackCount = backpacks.getAllBackpacks().size();
 
-                String resultMessage = String.format("§aData synchronized for %s - %d backpacks, integrity: %s",
-                        targetPlayer.getName().getString(), backpackCount,
-                        (integrityCheck ? "§aOK" : "§cERROR") + "§a");
+                String resultMessage;
+                if (isConsole(context.getSource())) {
+                    resultMessage = String.format("[CONSOLE] Data synchronized for %s - %d backpacks, integrity: %s",
+                            targetPlayer.getName().getString(), backpackCount,
+                            (integrityCheck ? "OK" : "ERROR"));
+                } else {
+                    resultMessage = String.format("§aData synchronized for %s - %d backpacks, integrity: %s",
+                            targetPlayer.getName().getString(), backpackCount,
+                            (integrityCheck ? "§aOK" : "§cERROR") + "§a");
+                }
 
                 context.getSource().sendFeedback(() -> Text.literal(resultMessage), false);
 
                 targetPlayer.sendMessage(Text.literal("§eData synchronized"), false);
 
             }).exceptionally(throwable -> {
-                context.getSource().sendFeedback(() ->
-                                Text.literal("§cError synchronizing data: " + throwable.getMessage()),
-                        false);
+                String errorMessage = isConsole(context.getSource()) ?
+                        "[CONSOLE] Error synchronizing data: " + throwable.getMessage() :
+                        "§cError synchronizing data: " + throwable.getMessage();
+
+                context.getSource().sendFeedback(() -> Text.literal(errorMessage), false);
                 return null;
             });
 
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
             return 0;
         }
     }
@@ -447,21 +524,27 @@ public class BackpackCommands {
         try {
             String reason = StringArgumentType.getString(context, "reason");
 
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§eCreating backup..."),
-                    false);
+            String backupMessage = isConsole(context.getSource()) ?
+                    "[CONSOLE] Creating backup..." :
+                    "§eCreating backup...";
+
+            context.getSource().sendFeedback(() -> Text.literal(backupMessage), false);
 
             BackpacksMod.getBackupManager().createManualBackup(reason);
 
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§aBackup created successfully"),
-                    false);
+            String successMessage = isConsole(context.getSource()) ?
+                    "[CONSOLE] Backup created successfully" :
+                    "§aBackup created successfully";
+
+            context.getSource().sendFeedback(() -> Text.literal(successMessage), false);
 
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cError creating backup: " + e.getMessage()),
-                    false);
+            String errorMessage = isConsole(context.getSource()) ?
+                    "[CONSOLE] Error creating backup: " + e.getMessage() :
+                    "§cError creating backup: " + e.getMessage();
+
+            context.getSource().sendFeedback(() -> Text.literal(errorMessage), false);
             return 0;
         }
     }
@@ -471,19 +554,35 @@ public class BackpackCommands {
             var backups = BackpacksMod.getBackupManager().getAvailableBackups();
 
             if (backups.isEmpty()) {
-                context.getSource().sendFeedback(() ->
-                                Text.literal("§eNo backups available"),
-                        false);
+                String noBackupsMessage = isConsole(context.getSource()) ?
+                        "[CONSOLE] No backups available" :
+                        "§eNo backups available";
+
+                context.getSource().sendFeedback(() -> Text.literal(noBackupsMessage), false);
                 return 0;
             }
 
-            StringBuilder message = new StringBuilder("§6=== Available Backups ===\n");
-            int count = 0;
-            for (String backup : backups) {
-                message.append("§e").append(++count).append(". §a").append(backup).append("\n");
-                if (count >= 10) {
-                    message.append("§7... and ").append(backups.size() - 10).append(" more");
-                    break;
+            StringBuilder message = new StringBuilder();
+
+            if (isConsole(context.getSource())) {
+                message.append("=== Available Backups ===\n");
+                int count = 0;
+                for (String backup : backups) {
+                    message.append(++count).append(". ").append(backup).append("\n");
+                    if (count >= 10) {
+                        message.append("... and ").append(backups.size() - 10).append(" more");
+                        break;
+                    }
+                }
+            } else {
+                message.append("§6=== Available Backups ===\n");
+                int count = 0;
+                for (String backup : backups) {
+                    message.append("§e").append(++count).append(". §a").append(backup).append("\n");
+                    if (count >= 10) {
+                        message.append("§7... and ").append(backups.size() - 10).append(" more");
+                        break;
+                    }
                 }
             }
 
@@ -491,75 +590,215 @@ public class BackpackCommands {
 
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
             return 0;
         }
     }
 
     private static int forceBackupAll(CommandContext<ServerCommandSource> context) {
         try {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§eSaving..."),
-                    false);
+            String savingMessage = isConsole(context.getSource()) ?
+                    "[CONSOLE] Saving all data..." :
+                    "§eSaving...";
+
+            context.getSource().sendFeedback(() -> Text.literal(savingMessage), false);
 
             BackpacksMod.getMongoManager().saveAllDirtyBackpacks();
 
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§aForced save completed"),
-                    false);
+            String successMessage = isConsole(context.getSource()) ?
+                    "[CONSOLE] Forced save completed" :
+                    "§aForced save completed";
+
+            context.getSource().sendFeedback(() -> Text.literal(successMessage), false);
 
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    // NUEVO: Comando para listar todos los jugadores con mochilas
+    private static int listAllPlayers(CommandContext<ServerCommandSource> context) {
+        try {
+            String infoMessage = isConsole(context.getSource()) ?
+                    "[CONSOLE] Listing players with backpacks..." :
+                    "§eChecking player data...";
+
+            context.getSource().sendFeedback(() -> Text.literal(infoMessage), false);
+
+            // Obtener jugadores online con mochilas
+            StringBuilder playerList = new StringBuilder();
+
+            if (isConsole(context.getSource())) {
+                playerList.append("=== Players with Backpacks ===\n");
+            } else {
+                playerList.append("§6=== Players with Backpacks ===\n");
+            }
+
+            int playerCount = 0;
+            if (BackpacksMod.getServer() != null) {
+                for (ServerPlayerEntity onlinePlayer : BackpacksMod.getServer().getPlayerManager().getPlayerList()) {
+                    try {
+                        BackpackManager.BackpackStats stats = BackpackManager.getPlayerStats(onlinePlayer.getUuid());
+                        if (stats.getTotalBackpacks() > 0) {
+                            playerCount++;
+                            if (isConsole(context.getSource())) {
+                                playerList.append(String.format("%d. %s - %d backpacks (%d items)\n",
+                                        playerCount, onlinePlayer.getName().getString(),
+                                        stats.getTotalBackpacks(), stats.getTotalItems()));
+                            } else {
+                                playerList.append(String.format("§e%d. §f%s §7- §a%d §7backpacks (§a%d §7items)\n",
+                                        playerCount, onlinePlayer.getName().getString(),
+                                        stats.getTotalBackpacks(), stats.getTotalItems()));
+                            }
+                        }
+                    } catch (Exception e) {
+                        // Skip player if error
+                    }
+                }
+            }
+
+            if (playerCount == 0) {
+                String noPlayersMessage = isConsole(context.getSource()) ?
+                        "No online players with backpacks found" :
+                        "§7No online players with backpacks found";
+                playerList.append(noPlayersMessage);
+            }
+
+            context.getSource().sendFeedback(() -> Text.literal(playerList.toString()), false);
+            return 1;
+        } catch (Exception e) {
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    // NUEVO: Estadísticas del servidor
+    private static int showServerStats(CommandContext<ServerCommandSource> context) {
+        try {
+            StringBuilder stats = new StringBuilder();
+
+            if (isConsole(context.getSource())) {
+                stats.append("=== BackpacksMod Server Statistics ===\n");
+                stats.append("Server ID: ").append(ConfigManager.getConfig().serverId).append("\n");
+                stats.append("Max backpacks per player: ").append(ConfigManager.getConfig().maxBackpacksPerPlayer).append("\n");
+                stats.append("Language messages: ").append(LanguageManager.getTotalMessages()).append("\n");
+                stats.append("Permission system: ").append(LuckPermsManager.getPermissionSystemInfo()).append("\n");
+
+                // Información del sistema VIP
+                int maxVipBackpacks = VipBackpackManager.getMaxPossibleVipBackpacks();
+                stats.append("Max VIP backpacks: ").append(maxVipBackpacks).append("\n");
+                stats.append("VIP system compatible: ").append(VipBackpackManager.isVipConfigurationValid() ? "Yes" : "No").append("\n");
+
+                // Información de respaldo
+                if (BackpacksMod.getBackupManager() != null) {
+                    var backups = BackpacksMod.getBackupManager().getAvailableBackups();
+                    stats.append("Available backups: ").append(backups.size()).append("\n");
+                }
+
+                // Información de MongoDB
+                if (BackpacksMod.getMongoManager() != null) {
+                    stats.append("MongoDB: Connected\n");
+                    stats.append("Pending writes: ").append(BackpacksMod.getMongoManager().hasPendingWrites() ? "Yes" : "No").append("\n");
+                }
+            } else {
+                stats.append("§6=== BackpacksMod Server Statistics ===\n");
+                stats.append("§eServer ID: §a").append(ConfigManager.getConfig().serverId).append("\n");
+                stats.append("§eMax backpacks per player: §a").append(ConfigManager.getConfig().maxBackpacksPerPlayer).append("\n");
+                stats.append("§eLanguage messages: §a").append(LanguageManager.getTotalMessages()).append("\n");
+                stats.append("§ePermission system: §a").append(LuckPermsManager.getPermissionSystemInfo()).append("\n");
+
+                // Información del sistema VIP
+                int maxVipBackpacks = VipBackpackManager.getMaxPossibleVipBackpacks();
+                stats.append("§eMax VIP backpacks: §a").append(maxVipBackpacks).append("\n");
+                stats.append("§eVIP system compatible: ").append(VipBackpackManager.isVipConfigurationValid() ? "§aYes" : "§cNo").append("\n");
+
+                // Información de respaldo
+                if (BackpacksMod.getBackupManager() != null) {
+                    var backups = BackpacksMod.getBackupManager().getAvailableBackups();
+                    stats.append("§eAvailable backups: §a").append(backups.size()).append("\n");
+                }
+
+                // Información de MongoDB
+                if (BackpacksMod.getMongoManager() != null) {
+                    stats.append("§eMongoDB: §aConnected\n");
+                    stats.append("§ePending writes: ").append(BackpacksMod.getMongoManager().hasPendingWrites() ? "§cYes" : "§aNo").append("\n");
+                }
+            }
+
+            context.getSource().sendFeedback(() -> Text.literal(stats.toString()), false);
+            return 1;
+        } catch (Exception e) {
+            sendErrorFeedback(context.getSource(), "Error getting server statistics: " + e.getMessage());
             return 0;
         }
     }
 
     // Nuevos métodos para gestión de permisos
     private static int showPermissionInfo(CommandContext<ServerCommandSource> context) {
-        if (!(context.getSource().getEntity() instanceof ServerPlayerEntity admin)) {
-            LanguageManager.sendFeedback(context.getSource(), "errorPlayerOnly", false);
-            return 0;
-        }
-
-        if (!LuckPermsManager.canModifyConfig(admin)) {
-            LuckPermsManager.sendNoPermissionMessage(admin, LuckPermsManager.ADMIN_CONFIG_PERMISSION);
-            return 0;
-        }
-
         StringBuilder message = new StringBuilder();
-        message.append("§6=== Permission System Information ===\n");
-        message.append("§eSystem: §a").append(LuckPermsManager.getPermissionSystemInfo()).append("\n");
-        message.append("§eLuckPerms Available: §a").append(LuckPermsManager.isLuckPermsAvailable() ? "Yes" : "No").append("\n\n");
 
-        message.append("§eUser Permissions:\n");
-        message.append("§7  - ").append(LuckPermsManager.USE_PERMISSION).append(" (use backpacks)\n");
-        message.append("§7  - ").append(LuckPermsManager.VIEW_OWN_PERMISSION).append(" (view own backpacks)\n");
-        message.append("§7  - ").append(LuckPermsManager.RENAME_PERMISSION).append(" (rename own backpacks)\n");
-        message.append("§7  - ").append(LuckPermsManager.CHANGE_ICON_PERMISSION).append(" (change icons)\n");
-        message.append("§7  - ").append(LuckPermsManager.VIEW_STATS_PERMISSION).append(" (view stats)\n\n");
+        if (isConsole(context.getSource())) {
+            message.append("=== Permission System Information ===\n");
+            message.append("System: ").append(LuckPermsManager.getPermissionSystemInfo()).append("\n");
+            message.append("LuckPerms Available: ").append(LuckPermsManager.isLuckPermsAvailable() ? "Yes" : "No").append("\n\n");
 
-        message.append("§eAdmin Permissions:\n");
-        message.append("§7  - ").append(LuckPermsManager.ADMIN_PERMISSION).append(" (main admin permission)\n");
-        message.append("§7  - ").append(LuckPermsManager.ADMIN_VIEW_PERMISSION).append(" (view others' backpacks)\n");
-        message.append("§7  - ").append(LuckPermsManager.ADMIN_EDIT_PERMISSION).append(" (edit others' backpacks)\n");
-        message.append("§7  - ").append(LuckPermsManager.ADMIN_GIVE_PERMISSION).append(" (give backpacks)\n");
-        message.append("§7  - ").append(LuckPermsManager.ADMIN_REMOVE_PERMISSION).append(" (remove backpacks)\n");
-        message.append("§7  - ").append(LuckPermsManager.ADMIN_RENAME_PERMISSION).append(" (rename any backpack)\n");
-        message.append("§7  - ").append(LuckPermsManager.ADMIN_SYNC_PERMISSION).append(" (sync data)\n");
-        message.append("§7  - ").append(LuckPermsManager.ADMIN_BACKUP_PERMISSION).append(" (manage backups)\n");
-        message.append("§7  - ").append(LuckPermsManager.ADMIN_CONFIG_PERMISSION).append(" (modify config)\n\n");
+            message.append("User Permissions:\n");
+            message.append("  - ").append(LuckPermsManager.USE_PERMISSION).append(" (use backpacks)\n");
+            message.append("  - ").append(LuckPermsManager.VIEW_OWN_PERMISSION).append(" (view own backpacks)\n");
+            message.append("  - ").append(LuckPermsManager.RENAME_PERMISSION).append(" (rename own backpacks)\n");
+            message.append("  - ").append(LuckPermsManager.CHANGE_ICON_PERMISSION).append(" (change icons)\n");
+            message.append("  - ").append(LuckPermsManager.VIEW_STATS_PERMISSION).append(" (view stats)\n\n");
 
-        if (LuckPermsManager.isLuckPermsAvailable()) {
-            message.append("§aLuckPerms is active! Use LuckPerms commands to manage permissions.\n");
-            message.append("§7Example: /lp user <player> permission set ").append(LuckPermsManager.USE_PERMISSION).append(" true");
+            message.append("Admin Permissions:\n");
+            message.append("  - ").append(LuckPermsManager.ADMIN_PERMISSION).append(" (main admin permission)\n");
+            message.append("  - ").append(LuckPermsManager.ADMIN_VIEW_PERMISSION).append(" (view others' backpacks)\n");
+            message.append("  - ").append(LuckPermsManager.ADMIN_EDIT_PERMISSION).append(" (edit others' backpacks)\n");
+            message.append("  - ").append(LuckPermsManager.ADMIN_GIVE_PERMISSION).append(" (give backpacks)\n");
+            message.append("  - ").append(LuckPermsManager.ADMIN_REMOVE_PERMISSION).append(" (remove backpacks)\n");
+            message.append("  - ").append(LuckPermsManager.ADMIN_RENAME_PERMISSION).append(" (rename any backpack)\n");
+            message.append("  - ").append(LuckPermsManager.ADMIN_SYNC_PERMISSION).append(" (sync data)\n");
+            message.append("  - ").append(LuckPermsManager.ADMIN_BACKUP_PERMISSION).append(" (manage backups)\n");
+            message.append("  - ").append(LuckPermsManager.ADMIN_CONFIG_PERMISSION).append(" (modify config)\n\n");
+
+            if (LuckPermsManager.isLuckPermsAvailable()) {
+                message.append("LuckPerms is active! Use LuckPerms commands to manage permissions.\n");
+                message.append("Example: /lp user <player> permission set ").append(LuckPermsManager.USE_PERMISSION).append(" true");
+            } else {
+                message.append("Falling back to OP-based permissions.\n");
+                message.append("Admin permissions require OP level ").append(ConfigManager.getConfig().adminPermissionLevel);
+            }
         } else {
-            message.append("§eFalling back to OP-based permissions.\n");
-            message.append("§7Admin permissions require OP level ").append(ConfigManager.getConfig().adminPermissionLevel);
+            message.append("§6=== Permission System Information ===\n");
+            message.append("§eSystem: §a").append(LuckPermsManager.getPermissionSystemInfo()).append("\n");
+            message.append("§eLuckPerms Available: §a").append(LuckPermsManager.isLuckPermsAvailable() ? "Yes" : "No").append("\n\n");
+
+            message.append("§eUser Permissions:\n");
+            message.append("§7  - ").append(LuckPermsManager.USE_PERMISSION).append(" (use backpacks)\n");
+            message.append("§7  - ").append(LuckPermsManager.VIEW_OWN_PERMISSION).append(" (view own backpacks)\n");
+            message.append("§7  - ").append(LuckPermsManager.RENAME_PERMISSION).append(" (rename own backpacks)\n");
+            message.append("§7  - ").append(LuckPermsManager.CHANGE_ICON_PERMISSION).append(" (change icons)\n");
+            message.append("§7  - ").append(LuckPermsManager.VIEW_STATS_PERMISSION).append(" (view stats)\n\n");
+
+            message.append("§eAdmin Permissions:\n");
+            message.append("§7  - ").append(LuckPermsManager.ADMIN_PERMISSION).append(" (main admin permission)\n");
+            message.append("§7  - ").append(LuckPermsManager.ADMIN_VIEW_PERMISSION).append(" (view others' backpacks)\n");
+            message.append("§7  - ").append(LuckPermsManager.ADMIN_EDIT_PERMISSION).append(" (edit others' backpacks)\n");
+            message.append("§7  - ").append(LuckPermsManager.ADMIN_GIVE_PERMISSION).append(" (give backpacks)\n");
+            message.append("§7  - ").append(LuckPermsManager.ADMIN_REMOVE_PERMISSION).append(" (remove backpacks)\n");
+            message.append("§7  - ").append(LuckPermsManager.ADMIN_RENAME_PERMISSION).append(" (rename any backpack)\n");
+            message.append("§7  - ").append(LuckPermsManager.ADMIN_SYNC_PERMISSION).append(" (sync data)\n");
+            message.append("§7  - ").append(LuckPermsManager.ADMIN_BACKUP_PERMISSION).append(" (manage backups)\n");
+            message.append("§7  - ").append(LuckPermsManager.ADMIN_CONFIG_PERMISSION).append(" (modify config)\n\n");
+
+            if (LuckPermsManager.isLuckPermsAvailable()) {
+                message.append("§aLuckPerms is active! Use LuckPerms commands to manage permissions.\n");
+                message.append("§7Example: /lp user <player> permission set ").append(LuckPermsManager.USE_PERMISSION).append(" true");
+            } else {
+                message.append("§eFalling back to OP-based permissions.\n");
+                message.append("§7Admin permissions require OP level ").append(ConfigManager.getConfig().adminPermissionLevel);
+            }
         }
 
         context.getSource().sendFeedback(() -> Text.literal(message.toString()), false);
@@ -567,41 +806,207 @@ public class BackpackCommands {
     }
 
     private static int reloadPermissions(CommandContext<ServerCommandSource> context) {
-        if (!(context.getSource().getEntity() instanceof ServerPlayerEntity admin)) {
-            LanguageManager.sendFeedback(context.getSource(), "errorPlayerOnly", false);
-            return 0;
+        if (context.getSource().getEntity() instanceof ServerPlayerEntity admin) {
+            boolean success = LuckPermsManager.reloadPermissions(admin);
+            return success ? 1 : 0;
+        } else {
+            // Desde consola
+            try {
+                LuckPermsManager.forceReinitialization();
+                context.getSource().sendFeedback(() ->
+                        Text.literal("[CONSOLE] Permissions reloaded: " + LuckPermsManager.getPermissionSystemInfo()), true);
+                return 1;
+            } catch (Exception e) {
+                context.getSource().sendFeedback(() ->
+                        Text.literal("[CONSOLE] Error reloading permissions: " + e.getMessage()), false);
+                return 0;
+            }
         }
-
-        boolean success = LuckPermsManager.reloadPermissions(admin);
-        return success ? 1 : 0;
     }
 
     private static int checkPlayerPermissions(CommandContext<ServerCommandSource> context) {
-        if (!(context.getSource().getEntity() instanceof ServerPlayerEntity admin)) {
-            LanguageManager.sendFeedback(context.getSource(), "errorPlayerOnly", false);
-            return 0;
-        }
-
-        if (!LuckPermsManager.canModifyConfig(admin)) {
-            LuckPermsManager.sendNoPermissionMessage(admin, LuckPermsManager.ADMIN_CONFIG_PERMISSION);
-            return 0;
-        }
-
         try {
             ServerPlayerEntity targetPlayer = EntityArgumentType.getPlayer(context, "player");
             String permissionInfo = LuckPermsManager.getPlayerPermissionInfo(targetPlayer);
 
-            admin.sendMessage(Text.literal(""), false);
-            admin.sendMessage(Text.literal("§6=== Permission Check for " + targetPlayer.getName().getString() + " ==="), false);
-            admin.sendMessage(Text.literal(permissionInfo), false);
-            admin.sendMessage(Text.literal(""), false);
+            if (isConsole(context.getSource())) {
+                context.getSource().sendFeedback(() ->
+                        Text.literal("=== Permission Check for " + targetPlayer.getName().getString() + " ==="), false);
+                context.getSource().sendFeedback(() ->
+                        Text.literal(permissionInfo), false);
+            } else {
+                ServerPlayerEntity admin = (ServerPlayerEntity) context.getSource().getEntity();
+                admin.sendMessage(Text.literal(""), false);
+                admin.sendMessage(Text.literal("§6=== Permission Check for " + targetPlayer.getName().getString() + " ==="), false);
+                admin.sendMessage(Text.literal(permissionInfo), false);
+                admin.sendMessage(Text.literal(""), false);
+            }
 
             return 1;
         } catch (Exception e) {
-            context.getSource().sendFeedback(() ->
-                            Text.literal("§cAn error occurred: " + e.getMessage()),
-                    false);
+            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
             return 0;
         }
+    }
+
+    // ========== MÉTODOS DE UTILIDAD PARA CONSOLA ==========
+
+    /**
+     * Verifica si el comando proviene de la consola
+     */
+    private static boolean isConsole(ServerCommandSource source) {
+        return source.getEntity() == null;
+    }
+
+    /**
+     * Envía mensaje específico para consola
+     */
+    private static void sendConsoleMessage(ServerCommandSource source, String messageKey) {
+        if (isConsole(source)) {
+            source.sendFeedback(() -> Text.literal("[CONSOLE] This command requires a player"), false);
+        } else {
+            LanguageManager.sendFeedback(source, messageKey, false);
+        }
+    }
+
+    /**
+     * Envía feedback adaptado para consola o jugador
+     */
+    private static void sendFeedback(ServerCommandSource source, String messageKey, boolean broadcastToOps) {
+        if (isConsole(source)) {
+            // Para consola, usar texto plano sin colores
+            String message = LanguageManager.getMessage(messageKey);
+            String cleanMessage = message.replaceAll("§[0-9a-fklmnor]", ""); // Remover códigos de color
+            source.sendFeedback(() -> Text.literal("[CONSOLE] " + cleanMessage), broadcastToOps);
+        } else {
+            // Para jugadores, usar sistema normal de idiomas
+            LanguageManager.sendFeedback(source, messageKey, broadcastToOps);
+        }
+    }
+
+    /**
+     * Envía mensaje de error adaptado para consola o jugador
+     */
+    private static void sendErrorFeedback(ServerCommandSource source, String errorMessage) {
+        if (isConsole(source)) {
+            source.sendFeedback(() -> Text.literal("[CONSOLE] ERROR: " + errorMessage), false);
+        } else {
+            source.sendFeedback(() -> Text.literal("§cError: " + errorMessage), false);
+        }
+    }
+
+    /**
+     * Obtiene información del ejecutor del comando
+     */
+    private static String getCommandExecutorInfo(ServerCommandSource source) {
+        if (isConsole(source)) {
+            return "CONSOLE";
+        } else if (source.getEntity() instanceof ServerPlayerEntity player) {
+            return player.getName().getString();
+        } else {
+            return "UNKNOWN";
+        }
+    }
+
+    /**
+     * Log mejorado para acciones administrativas
+     */
+    private static void logAdminAction(ServerCommandSource source, String action, String details) {
+        String executor = getCommandExecutorInfo(source);
+        BackpacksMod.LOGGER.info("[ADMIN ACTION] {} executed '{}' - {}", executor, action, details);
+    }
+
+    // ========== COMANDOS MEJORADOS CON LOGGING ==========
+
+    /**
+     * Wrapper mejorado para el comando give con logging completo
+     */
+    private static void logGiveBackpack(ServerCommandSource source, String playerName, String backpackName, int id, int slots) {
+        String executor = getCommandExecutorInfo(source);
+        String details = String.format("gave backpack '%s' (ID: %d, %d slots) to %s",
+                backpackName, id, slots, playerName);
+        logAdminAction(source, "give backpack", details);
+    }
+
+    /**
+     * Wrapper mejorado para el comando remove con logging completo
+     */
+    private static void logRemoveBackpack(ServerCommandSource source, String playerName, String backpackName, int id) {
+        String executor = getCommandExecutorInfo(source);
+        String details = String.format("removed backpack '%s' (ID: %d) from %s",
+                backpackName, id, playerName);
+        logAdminAction(source, "remove backpack", details);
+    }
+
+    /**
+     * Wrapper mejorado para el comando rename con logging completo
+     */
+    private static void logRenameBackpack(ServerCommandSource source, String playerName, int id, String oldName, String newName) {
+        String executor = getCommandExecutorInfo(source);
+        String details = String.format("renamed backpack ID %d of %s from '%s' to '%s'",
+                id, playerName, oldName, newName);
+        logAdminAction(source, "rename backpack", details);
+    }
+
+    // ========== INFORMACIÓN Y AYUDA PARA CONSOLA ==========
+
+    /**
+     * Muestra ayuda específica para uso desde consola
+     */
+    public static void showConsoleHelp(ServerCommandSource source) {
+        if (!isConsole(source)) return;
+
+        StringBuilder help = new StringBuilder();
+        help.append("=== BackpacksMod Console Commands ===\n");
+        help.append("Available commands for console:\n\n");
+
+        String cmd = ConfigManager.getConfig().mainCommand;
+
+        help.append("Player Management:\n");
+        help.append("  ").append(cmd).append(" give <player> <name> <slots> - Give backpack to player\n");
+        help.append("  ").append(cmd).append(" remove <player> <id> - Remove backpack from player\n");
+        help.append("  ").append(cmd).append(" rename <player> <id> <new_name> - Rename player's backpack\n");
+        help.append("  ").append(cmd).append(" info <player> - Show player's backpack statistics\n");
+        help.append("  ").append(cmd).append(" sync <player> - Synchronize player's data\n");
+        help.append("  ").append(cmd).append(" list - List all players with backpacks\n");
+        help.append("  ").append(cmd).append(" stats - Show server statistics\n\n");
+
+        help.append("System Management:\n");
+        help.append("  ").append(cmd).append(" backup create <reason> - Create manual backup\n");
+        help.append("  ").append(cmd).append(" backup list - List available backups\n");
+        help.append("  ").append(cmd).append(" backup force-save - Force save all data\n");
+        help.append("  ").append(cmd).append(" permissions info - Show permission system info\n");
+        help.append("  ").append(cmd).append(" permissions reload - Reload permission system\n");
+        help.append("  ").append(cmd).append(" permissions check <player> - Check player permissions\n\n");
+
+        help.append("Examples:\n");
+        help.append("  ").append(cmd).append(" give Steve \"Storage Chest\" 27\n");
+        help.append("  ").append(cmd).append(" remove Alex 1\n");
+        help.append("  ").append(cmd).append(" info Steve\n");
+        help.append("  ").append(cmd).append(" backup create \"Weekly backup\"\n");
+        help.append("  ").append(cmd).append(" stats\n\n");
+
+        help.append("Notes:\n");
+        help.append("- Console has full administrative privileges\n");
+        help.append("- All actions are logged to server console\n");
+        help.append("- Player names are case-sensitive\n");
+        help.append("- Backpack slots must be multiples of 9 (9-54)\n");
+        help.append("- Use quotes for names with spaces: \"My Backpack\"\n");
+
+        source.sendFeedback(() -> Text.literal(help.toString()), false);
+    }
+
+    /**
+     * Comando de ayuda específico para consola
+     */
+    public static void registerConsoleHelp(CommandDispatcher<ServerCommandSource> dispatcher) {
+        String helpCommand = ConfigManager.getConfig().mainCommand + "-help";
+
+        dispatcher.register(CommandManager.literal(helpCommand)
+                .requires(source -> isConsole(source)) // Solo para consola
+                .executes(context -> {
+                    showConsoleHelp(context.getSource());
+                    return 1;
+                }));
     }
 }
