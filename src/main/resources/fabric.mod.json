@@ -1,0 +1,40 @@
+{
+	"schemaVersion": 1,
+	"id": "backpacks",
+	"version": "${version}",
+	"name": "Backpacks MongoDB",
+	"description": "Advanced backpack system with MongoDB storage and LuckPerms integration",
+	"authors": [
+		"SharKz"
+	],
+	"contact": {
+		"homepage": "https://example.com/",
+		"sources": "https://github.com/example/backpacks"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/backpacks/icon.png",
+	"environment": "server",
+	"entrypoints": {
+		"server": [
+			"es.minemon.backpacks.BackpacksMod"
+		]
+	},
+	"mixins": [],
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "${minecraft_version}",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"luckperms": "*"
+	},
+	"custom": {
+		"modmenu": {
+			"badges": ["server"],
+			"links": {
+				"modmenu.discord": "https://discord.gg/yourserver"
+			}
+		}
+	}
+}

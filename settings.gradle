@@ -1,0 +1,14 @@
+pluginManagement {
+	repositories {
+		maven {
+			name = 'Fabric'
+			url = 'https://maven.fabricmc.net/'
+		}
+		gradlePluginPortal()
+	}
+	plugins {
+		id 'fabric-loom' version '1.6-SNAPSHOT'
+	}
+}
+
+rootProject.name = 'backpacks-mongo'
