@@ -1,10 +1,10 @@
-// SIMPLIFICADO: BackpackConfig.java - SIN sistema de backups
+// OPTIMIZADO: BackpackConfig.java - SIN sistema de backups
 package es.minemon.backpacks;
 
 import java.util.Map;
 
 /**
- * Configuración simplificada SIN sistema de backups
+ * Configuración optimizada SIN sistema de backups
  * Solo MongoDB para persistencia de datos
  */
 public class BackpackConfig {

@@ -108,21 +108,7 @@ public class BackpackCommands {
                         .then(CommandManager.literal("view")
                                 .then(CommandManager.argument("player", EntityArgumentType.player())
                                         .executes(BackpackCommands::openAdminView))))
-                .then(CommandManager.literal("backup")
-                        .requires(source -> {
-                            if (source.getEntity() == null) return true; // Consola
-                            if (source.getEntity() instanceof ServerPlayerEntity player) {
-                                return LuckPermsManager.canManageBackups(player);
-                            }
-                            return false;
-                        })
-                        .then(CommandManager.literal("create")
-                                .then(CommandManager.argument("reason", StringArgumentType.greedyString())
-                                        .executes(BackpackCommands::createManualBackup)))
-                        .then(CommandManager.literal("list")
-                                .executes(BackpackCommands::listBackups))
-                        .then(CommandManager.literal("force-save")
-                                .executes(BackpackCommands::forceBackupAll)))
+                // ELIMINADO: Comandos de backup
                 .then(CommandManager.literal("permissions")
                         .requires(source -> {
                             if (source.getEntity() == null) return true; // Consola
@@ -157,7 +143,17 @@ public class BackpackCommands {
                             }
                             return false;
                         })
-                        .executes(BackpackCommands::showServerStats)));
+                        .executes(BackpackCommands::showServerStats))
+                // NUEVO: Comando para forzar guardado
+                .then(CommandManager.literal("force-save")
+                        .requires(source -> {
+                            if (source.getEntity() == null) return true; // Consola
+                            if (source.getEntity() instanceof ServerPlayerEntity player) {
+                                return LuckPermsManager.canModifyConfig(player);
+                            }
+                            return false;
+                        })
+                        .executes(BackpackCommands::forceSaveAll)));
 
         // Comando para jugadores - Renombrar sus propias mochilas
         dispatcher.register(CommandManager.literal("rename-backpack")
@@ -254,10 +250,7 @@ public class BackpackCommands {
             MongoBackpackManager.BackpackData backpackData = backpacks.getBackpack(id);
             String backpackName = backpackData != null ? backpackData.getName() : "Unknown";
 
-            // Crear backup antes de eliminar si está habilitado
-            if (ConfigManager.isFeatureEnabled("backup")) {
-                BackpacksMod.getBackupManager().createManualBackup("Removing backpack ID " + id + " from " + targetPlayer.getName().getString());
-            }
+            // ELIMINADO: Crear backup antes de eliminar
 
             BackpackManager.removeBackpack(targetPlayer.getUuid(), id);
 
@@ -520,94 +513,20 @@ public class BackpackCommands {
         }
     }
 
-    private static int createManualBackup(CommandContext<ServerCommandSource> context) {
-        try {
-            String reason = StringArgumentType.getString(context, "reason");
-
-            String backupMessage = isConsole(context.getSource()) ?
-                    "[CONSOLE] Creating backup..." :
-                    "§eCreating backup...";
-
-            context.getSource().sendFeedback(() -> Text.literal(backupMessage), false);
-
-            BackpacksMod.getBackupManager().createManualBackup(reason);
-
-            String successMessage = isConsole(context.getSource()) ?
-                    "[CONSOLE] Backup created successfully" :
-                    "§aBackup created successfully";
-
-            context.getSource().sendFeedback(() -> Text.literal(successMessage), false);
-
-            return 1;
-        } catch (Exception e) {
-            String errorMessage = isConsole(context.getSource()) ?
-                    "[CONSOLE] Error creating backup: " + e.getMessage() :
-                    "§cError creating backup: " + e.getMessage();
-
-            context.getSource().sendFeedback(() -> Text.literal(errorMessage), false);
-            return 0;
-        }
-    }
-
-    private static int listBackups(CommandContext<ServerCommandSource> context) {
-        try {
-            var backups = BackpacksMod.getBackupManager().getAvailableBackups();
-
-            if (backups.isEmpty()) {
-                String noBackupsMessage = isConsole(context.getSource()) ?
-                        "[CONSOLE] No backups available" :
-                        "§eNo backups available";
-
-                context.getSource().sendFeedback(() -> Text.literal(noBackupsMessage), false);
-                return 0;
-            }
-
-            StringBuilder message = new StringBuilder();
-
-            if (isConsole(context.getSource())) {
-                message.append("=== Available Backups ===\n");
-                int count = 0;
-                for (String backup : backups) {
-                    message.append(++count).append(". ").append(backup).append("\n");
-                    if (count >= 10) {
-                        message.append("... and ").append(backups.size() - 10).append(" more");
-                        break;
-                    }
-                }
-            } else {
-                message.append("§6=== Available Backups ===\n");
-                int count = 0;
-                for (String backup : backups) {
-                    message.append("§e").append(++count).append(". §a").append(backup).append("\n");
-                    if (count >= 10) {
-                        message.append("§7... and ").append(backups.size() - 10).append(" more");
-                        break;
-                    }
-                }
-            }
-
-            context.getSource().sendFeedback(() -> Text.literal(message.toString()), false);
-
-            return 1;
-        } catch (Exception e) {
-            sendErrorFeedback(context.getSource(), "An error occurred: " + e.getMessage());
-            return 0;
-        }
-    }
-
-    private static int forceBackupAll(CommandContext<ServerCommandSource> context) {
+    // NUEVO: Comando para forzar guardado (reemplaza el backup)
+    private static int forceSaveAll(CommandContext<ServerCommandSource> context) {
         try {
             String savingMessage = isConsole(context.getSource()) ?
-                    "[CONSOLE] Saving all data..." :
-                    "§eSaving...";
+                    "[CONSOLE] Forcing save of all backpack data..." :
+                    "§eForcando guardado de datos...";
 
             context.getSource().sendFeedback(() -> Text.literal(savingMessage), false);
 
             BackpacksMod.getMongoManager().saveAllDirtyBackpacks();
 
             String successMessage = isConsole(context.getSource()) ?
-                    "[CONSOLE] Forced save completed" :
-                    "§aForced save completed";
+                    "[CONSOLE] All backpack data saved to MongoDB" :
+                    "§aTodos los datos guardados en MongoDB";
 
             context.getSource().sendFeedback(() -> Text.literal(successMessage), false);
 
@@ -674,13 +593,13 @@ public class BackpackCommands {
         }
     }
 
-    // NUEVO: Estadísticas del servidor
+    // NUEVO: Estadísticas del servidor (sin información de backups)
     private static int showServerStats(CommandContext<ServerCommandSource> context) {
         try {
             StringBuilder stats = new StringBuilder();
 
             if (isConsole(context.getSource())) {
-                stats.append("=== BackpacksMod Server Statistics ===\n");
+                stats.append("=== BackpacksMod Server Statistics (NO BACKUPS) ===\n");
                 stats.append("Server ID: ").append(ConfigManager.getConfig().serverId).append("\n");
                 stats.append("Max backpacks per player: ").append(ConfigManager.getConfig().maxBackpacksPerPlayer).append("\n");
                 stats.append("Language messages: ").append(LanguageManager.getTotalMessages()).append("\n");
@@ -691,11 +610,9 @@ public class BackpackCommands {
                 stats.append("Max VIP backpacks: ").append(maxVipBackpacks).append("\n");
                 stats.append("VIP system compatible: ").append(VipBackpackManager.isVipConfigurationValid() ? "Yes" : "No").append("\n");
 
-                // Información de respaldo
-                if (BackpacksMod.getBackupManager() != null) {
-                    var backups = BackpacksMod.getBackupManager().getAvailableBackups();
-                    stats.append("Available backups: ").append(backups.size()).append("\n");
-                }
+                // ELIMINADO: Información de respaldo
+                stats.append("Backup system: DISABLED for performance\n");
+                stats.append("Data persistence: MongoDB only\n");
 
                 // Información de MongoDB
                 if (BackpacksMod.getMongoManager() != null) {
@@ -703,7 +620,7 @@ public class BackpackCommands {
                     stats.append("Pending writes: ").append(BackpacksMod.getMongoManager().hasPendingWrites() ? "Yes" : "No").append("\n");
                 }
             } else {
-                stats.append("§6=== BackpacksMod Server Statistics ===\n");
+                stats.append("§6=== BackpacksMod Server Statistics (NO BACKUPS) ===\n");
                 stats.append("§eServer ID: §a").append(ConfigManager.getConfig().serverId).append("\n");
                 stats.append("§eMax backpacks per player: §a").append(ConfigManager.getConfig().maxBackpacksPerPlayer).append("\n");
                 stats.append("§eLanguage messages: §a").append(LanguageManager.getTotalMessages()).append("\n");
@@ -714,11 +631,9 @@ public class BackpackCommands {
                 stats.append("§eMax VIP backpacks: §a").append(maxVipBackpacks).append("\n");
                 stats.append("§eVIP system compatible: ").append(VipBackpackManager.isVipConfigurationValid() ? "§aYes" : "§cNo").append("\n");
 
-                // Información de respaldo
-                if (BackpacksMod.getBackupManager() != null) {
-                    var backups = BackpacksMod.getBackupManager().getAvailableBackups();
-                    stats.append("§eAvailable backups: §a").append(backups.size()).append("\n");
-                }
+                // ELIMINADO: Información de respaldo
+                stats.append("§eBackup system: §cDISABLED for performance\n");
+                stats.append("§eData persistence: §aMongoDB only\n");
 
                 // Información de MongoDB
                 if (BackpacksMod.getMongoManager() != null) {
@@ -759,7 +674,6 @@ public class BackpackCommands {
             message.append("  - ").append(LuckPermsManager.ADMIN_REMOVE_PERMISSION).append(" (remove backpacks)\n");
             message.append("  - ").append(LuckPermsManager.ADMIN_RENAME_PERMISSION).append(" (rename any backpack)\n");
             message.append("  - ").append(LuckPermsManager.ADMIN_SYNC_PERMISSION).append(" (sync data)\n");
-            message.append("  - ").append(LuckPermsManager.ADMIN_BACKUP_PERMISSION).append(" (manage backups)\n");
             message.append("  - ").append(LuckPermsManager.ADMIN_CONFIG_PERMISSION).append(" (modify config)\n\n");
 
             if (LuckPermsManager.isLuckPermsAvailable()) {
@@ -789,7 +703,6 @@ public class BackpackCommands {
             message.append("§7  - ").append(LuckPermsManager.ADMIN_REMOVE_PERMISSION).append(" (remove backpacks)\n");
             message.append("§7  - ").append(LuckPermsManager.ADMIN_RENAME_PERMISSION).append(" (rename any backpack)\n");
             message.append("§7  - ").append(LuckPermsManager.ADMIN_SYNC_PERMISSION).append(" (sync data)\n");
-            message.append("§7  - ").append(LuckPermsManager.ADMIN_BACKUP_PERMISSION).append(" (manage backups)\n");
             message.append("§7  - ").append(LuckPermsManager.ADMIN_CONFIG_PERMISSION).append(" (modify config)\n\n");
 
             if (LuckPermsManager.isLuckPermsAvailable()) {
@@ -951,13 +864,13 @@ public class BackpackCommands {
     // ========== INFORMACIÓN Y AYUDA PARA CONSOLA ==========
 
     /**
-     * Muestra ayuda específica para uso desde consola
+     * Muestra ayuda específica para uso desde consola (SIN comandos de backup)
      */
     public static void showConsoleHelp(ServerCommandSource source) {
         if (!isConsole(source)) return;
 
         StringBuilder help = new StringBuilder();
-        help.append("=== BackpacksMod Console Commands ===\n");
+        help.append("=== BackpacksMod Console Commands (NO BACKUPS) ===\n");
         help.append("Available commands for console:\n\n");
 
         String cmd = ConfigManager.getConfig().mainCommand;
@@ -972,9 +885,7 @@ public class BackpackCommands {
         help.append("  ").append(cmd).append(" stats - Show server statistics\n\n");
 
         help.append("System Management:\n");
-        help.append("  ").append(cmd).append(" backup create <reason> - Create manual backup\n");
-        help.append("  ").append(cmd).append(" backup list - List available backups\n");
-        help.append("  ").append(cmd).append(" backup force-save - Force save all data\n");
+        help.append("  ").append(cmd).append(" force-save - Force save all data to MongoDB\n");
         help.append("  ").append(cmd).append(" permissions info - Show permission system info\n");
         help.append("  ").append(cmd).append(" permissions reload - Reload permission system\n");
         help.append("  ").append(cmd).append(" permissions check <player> - Check player permissions\n\n");
@@ -983,7 +894,7 @@ public class BackpackCommands {
         help.append("  ").append(cmd).append(" give Steve \"Storage Chest\" 27\n");
         help.append("  ").append(cmd).append(" remove Alex 1\n");
         help.append("  ").append(cmd).append(" info Steve\n");
-        help.append("  ").append(cmd).append(" backup create \"Weekly backup\"\n");
+        help.append("  ").append(cmd).append(" force-save\n");
         help.append("  ").append(cmd).append(" stats\n\n");
 
         help.append("Notes:\n");
@@ -992,6 +903,8 @@ public class BackpackCommands {
         help.append("- Player names are case-sensitive\n");
         help.append("- Backpack slots must be multiples of 9 (9-54)\n");
         help.append("- Use quotes for names with spaces: \"My Backpack\"\n");
+        help.append("- BACKUP SYSTEM DISABLED - All data relies on MongoDB\n");
+        help.append("- Use force-save for manual data persistence\n");
 
         source.sendFeedback(() -> Text.literal(help.toString()), false);
     }

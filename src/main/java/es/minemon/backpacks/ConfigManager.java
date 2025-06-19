@@ -1,4 +1,4 @@
-// SIMPLIFICADO: ConfigManager.java - SIN sistema de backups
+// OPTIMIZADO: ConfigManager.java - SIN sistema de backups
 package es.minemon.backpacks;
 
 import com.google.gson.Gson;

@@ -1,4 +1,4 @@
-// CORREGIDO: MongoBackpackManager.java
+// OPTIMIZADO: MongoBackpackManager.java con timeouts más flexibles
 package es.minemon.backpacks;
 
 import com.mongodb.client.*;
@@ -25,22 +25,22 @@ public class MongoBackpackManager {
     private MongoDatabase database;
     private MongoCollection<Document> collection;
 
-    // CORREGIDO: Cache thread-safe mejorado
+    // Cache thread-safe mejorado
     private final ConcurrentHashMap<UUID, PlayerBackpacks> localCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Boolean> pendingWrites = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Long> lastSyncTime = new ConcurrentHashMap<>();
 
-    // NUEVO: Control de operaciones concurrentes
-    private final Semaphore mongoOperationsSemaphore = new Semaphore(10); // Max 10 operaciones simultáneas
+    // Control de operaciones concurrentes más permisivo
+    private final Semaphore mongoOperationsSemaphore = new Semaphore(20); // Aumentado a 20
     private final AtomicInteger activeOperations = new AtomicInteger(0);
     private final AtomicBoolean isShuttingDown = new AtomicBoolean(false);
 
-    // CORREGIDO: Executor con límites estrictos y timeout
+    // Executor con más capacidad
     private final ExecutorService mongoExecutor = new ThreadPoolExecutor(
-            2, // Core threads
-            8, // Max threads
-            30L, TimeUnit.SECONDS,
-            new LinkedBlockingQueue<>(100), // Límite de cola
+            4, // Más core threads
+            12, // Más max threads
+            60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(200), // Cola más grande
             r -> {
                 Thread t = new Thread(r, "Mongo-Worker-" + System.nanoTime());
                 t.setDaemon(true);
@@ -49,13 +49,13 @@ public class MongoBackpackManager {
                 });
                 return t;
             },
-            new ThreadPoolExecutor.CallerRunsPolicy() // Si está lleno, ejecutar en hilo llamador
+            new ThreadPoolExecutor.CallerRunsPolicy()
     );
 
-    // Timeouts más agresivos para prevenir bloqueos
-    private static final long CACHE_TIMEOUT = 45000; // 45 segundos (reducido)
-    private static final long OPERATION_TIMEOUT = 10000; // 10 segundos max por operación
-    private static final int MAX_CACHE_SIZE = 500; // Reducido para menos memoria
+    // Timeouts más permisivos para evitar fallos
+    private static final long CACHE_TIMEOUT = 120000; // 2 minutos (aumentado)
+    private static final long OPERATION_TIMEOUT = 30000; // 30 segundos (aumentado)
+    private static final int MAX_CACHE_SIZE = 1000; // Aumentado
 
     public MongoBackpackManager() {
         try {
@@ -68,27 +68,31 @@ public class MongoBackpackManager {
             // Índices básicos
             collection.createIndex(new Document("_id", 1));
 
-            BackpacksMod.LOGGER.info("MongoDB conectado con límites de concurrencia");
+            BackpacksMod.LOGGER.info("MongoDB conectado con timeouts optimizados");
         } catch (Exception e) {
             BackpacksMod.LOGGER.error("Error conectando a MongoDB", e);
             throw new RuntimeException("No se pudo conectar a MongoDB", e);
         }
     }
 
-    // CORREGIDO: Operaciones con timeout y control de concurrencia
+    // CORREGIDO: Operaciones con timeouts más permisivos y mejor fallback
     public CompletableFuture<PlayerBackpacks> loadPlayerBackpacks(UUID playerId) {
         if (isShuttingDown.get()) {
             return CompletableFuture.completedFuture(getCachedOrEmpty(playerId));
         }
 
         return CompletableFuture.supplyAsync(() -> {
-            if (!mongoOperationsSemaphore.tryAcquire()) {
-                BackpacksMod.LOGGER.warn("Too many concurrent operations, using cache for: " + playerId);
-                return getCachedOrEmpty(playerId);
-            }
-
-            activeOperations.incrementAndGet();
+            // Intentar obtener semáforo, pero si no se puede, usar cache
+            boolean acquired = false;
             try {
+                acquired = mongoOperationsSemaphore.tryAcquire(5, TimeUnit.SECONDS);
+                if (!acquired) {
+                    BackpacksMod.LOGGER.warn("MongoDB busy, using cache for player: " + playerId);
+                    return getCachedOrEmpty(playerId);
+                }
+
+                activeOperations.incrementAndGet();
+
                 // Verificar cache válido primero
                 PlayerBackpacks cached = localCache.get(playerId);
                 Long lastSync = lastSyncTime.get(playerId);
@@ -99,8 +103,8 @@ public class MongoBackpackManager {
                     return cached;
                 }
 
-                // Cargar desde MongoDB con timeout
-                Future<PlayerBackpacks> loadTask = mongoExecutor.submit(() -> {
+                // Cargar desde MongoDB con timeout más permisivo
+                CompletableFuture<PlayerBackpacks> loadTask = CompletableFuture.supplyAsync(() -> {
                     try {
                         Bson filter = Filters.eq("_id", playerId.toString());
                         Document doc = collection.find(filter).first();
@@ -114,42 +118,52 @@ public class MongoBackpackManager {
                         BackpacksMod.LOGGER.warn("Error loading from MongoDB for " + playerId + ": " + e.getMessage());
                         throw e;
                     }
-                });
+                }, mongoExecutor);
 
-                PlayerBackpacks result = loadTask.get(OPERATION_TIMEOUT, TimeUnit.MILLISECONDS);
-                updateCache(playerId, result);
-                return result;
+                try {
+                    PlayerBackpacks result = loadTask.get(OPERATION_TIMEOUT, TimeUnit.MILLISECONDS);
+                    updateCache(playerId, result);
+                    return result;
+                } catch (TimeoutException e) {
+                    BackpacksMod.LOGGER.warn("MongoDB load timeout for " + playerId + ", using cache");
+                    return getCachedOrEmpty(playerId);
+                } catch (Exception e) {
+                    BackpacksMod.LOGGER.warn("Error loading from MongoDB for " + playerId + ": " + e.getMessage());
+                    return getCachedOrEmpty(playerId);
+                }
 
-            } catch (TimeoutException e) {
-                BackpacksMod.LOGGER.error("MongoDB load timeout for " + playerId + ", using cache");
-                return getCachedOrEmpty(playerId);
-            } catch (Exception e) {
-                BackpacksMod.LOGGER.error("Error loading from MongoDB for " + playerId + ": " + e.getMessage());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                BackpacksMod.LOGGER.warn("Interrupted while waiting for MongoDB semaphore");
                 return getCachedOrEmpty(playerId);
             } finally {
-                activeOperations.decrementAndGet();
-                mongoOperationsSemaphore.release();
+                if (acquired) {
+                    activeOperations.decrementAndGet();
+                    mongoOperationsSemaphore.release();
+                }
             }
         }, mongoExecutor);
     }
 
-    // CORREGIDO: Guardado con timeout y manejo de errores mejorado
+    // CORREGIDO: Guardado más tolerante a fallos
     public CompletableFuture<Void> savePlayerBackpacks(UUID playerId, PlayerBackpacks backpacks) {
         if (isShuttingDown.get()) {
             return CompletableFuture.completedFuture(null);
         }
 
         return CompletableFuture.runAsync(() -> {
-            if (!mongoOperationsSemaphore.tryAcquire()) {
-                BackpacksMod.LOGGER.warn("Too many concurrent save operations, skipping save for: " + playerId);
-                return;
-            }
-
-            pendingWrites.put(playerId, true);
-            activeOperations.incrementAndGet();
-
+            boolean acquired = false;
             try {
-                Future<Void> saveTask = mongoExecutor.submit(() -> {
+                acquired = mongoOperationsSemaphore.tryAcquire(10, TimeUnit.SECONDS);
+                if (!acquired) {
+                    BackpacksMod.LOGGER.warn("MongoDB busy, skipping save for: " + playerId);
+                    return;
+                }
+
+                pendingWrites.put(playerId, true);
+                activeOperations.incrementAndGet();
+
+                CompletableFuture<Void> saveTask = CompletableFuture.runAsync(() -> {
                     try {
                         Document doc = backpacks.toDocument();
                         doc.put("_id", playerId.toString());
@@ -158,27 +172,36 @@ public class MongoBackpackManager {
                         ReplaceOptions options = new ReplaceOptions().upsert(true);
 
                         collection.replaceOne(filter, doc, options);
-                        return null;
                     } catch (Exception e) {
                         BackpacksMod.LOGGER.error("Error saving to MongoDB for " + playerId + ": " + e.getMessage());
                         throw e;
                     }
-                });
+                }, mongoExecutor);
 
-                saveTask.get(OPERATION_TIMEOUT, TimeUnit.MILLISECONDS);
+                try {
+                    saveTask.get(OPERATION_TIMEOUT, TimeUnit.MILLISECONDS);
 
-                backpacks.markClean();
-                backpacks.setLastSync(System.currentTimeMillis());
-                updateCache(playerId, backpacks);
+                    backpacks.markClean();
+                    backpacks.setLastSync(System.currentTimeMillis());
+                    updateCache(playerId, backpacks);
 
-            } catch (TimeoutException e) {
-                BackpacksMod.LOGGER.error("MongoDB save timeout for " + playerId);
-            } catch (Exception e) {
-                BackpacksMod.LOGGER.error("Error saving to MongoDB for " + playerId + ": " + e.getMessage());
+                } catch (TimeoutException e) {
+                    BackpacksMod.LOGGER.error("MongoDB save timeout for " + playerId);
+                    // No marcar como clean si falló el guardado
+                } catch (Exception e) {
+                    BackpacksMod.LOGGER.error("Error saving to MongoDB for " + playerId + ": " + e.getMessage());
+                    // No marcar como clean si falló el guardado
+                }
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                BackpacksMod.LOGGER.warn("Interrupted while waiting for save semaphore for " + playerId);
             } finally {
                 pendingWrites.remove(playerId);
-                activeOperations.decrementAndGet();
-                mongoOperationsSemaphore.release();
+                if (acquired) {
+                    activeOperations.decrementAndGet();
+                    mongoOperationsSemaphore.release();
+                }
             }
         }, mongoExecutor);
     }
@@ -192,14 +215,14 @@ public class MongoBackpackManager {
         return cached;
     }
 
-    // CORREGIDO: Guardado masivo con timeout global
+    // CORREGIDO: Guardado masivo con timeouts más permisivos
     public void saveAllDirtyBackpacks() {
         if (isShuttingDown.get()) {
             return;
         }
 
         List<CompletableFuture<Void>> futures = new ArrayList<>();
-        int maxConcurrent = Math.min(5, localCache.size()); // Límite de operaciones concurrentes
+        int maxConcurrent = Math.min(10, localCache.size());
 
         int processed = 0;
         for (Map.Entry<UUID, PlayerBackpacks> entry : localCache.entrySet()) {
@@ -211,97 +234,84 @@ public class MongoBackpackManager {
 
         if (!futures.isEmpty()) {
             try {
-                // Timeout total más agresivo
+                // Timeout más permisivo
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                        .get(15, TimeUnit.SECONDS); // Reducido de 30 a 15 segundos
+                        .get(60, TimeUnit.SECONDS); // Aumentado a 60 segundos
                 BackpacksMod.LOGGER.info("Saved " + futures.size() + " dirty backpacks");
             } catch (TimeoutException e) {
-                BackpacksMod.LOGGER.error("Global save timeout - some data may not be saved");
+                BackpacksMod.LOGGER.warn("Mass save timeout - some data may not be saved (normal during high load)");
             } catch (Exception e) {
                 BackpacksMod.LOGGER.error("Error in mass save operation", e);
             }
         }
     }
 
-    // CORREGIDO: Actualización de cache con gestión de memoria agresiva
+    // Cache management mejorado
     private void updateCache(UUID playerId, PlayerBackpacks backpacks) {
-        // Limpieza preventiva del cache
+        // Limpieza preventiva menos agresiva
         if (localCache.size() >= MAX_CACHE_SIZE) {
-            cleanupCacheAggressively();
+            cleanupCacheGracefully();
         }
 
         localCache.put(playerId, backpacks);
         lastSyncTime.put(playerId, System.currentTimeMillis());
     }
 
-    // NUEVO: Limpieza agresiva del cache
-    private void cleanupCacheAggressively() {
+    // NUEVO: Limpieza de cache más suave
+    private void cleanupCacheGracefully() {
         try {
             long now = System.currentTimeMillis();
             List<UUID> toRemove = new ArrayList<>();
 
-            // Remover entradas antiguas y limpias
+            // Solo remover entradas muy antiguas
             for (Map.Entry<UUID, Long> entry : lastSyncTime.entrySet()) {
                 UUID playerId = entry.getKey();
                 long lastSync = entry.getValue();
                 PlayerBackpacks backpacks = localCache.get(playerId);
 
-                // Remover si es antiguo Y no está sucio
-                if ((now - lastSync) > CACHE_TIMEOUT &&
+                // Solo remover si es muy antiguo Y no está sucio
+                if ((now - lastSync) > (CACHE_TIMEOUT * 2) &&
                         (backpacks == null || !backpacks.isDirty())) {
                     toRemove.add(playerId);
                 }
             }
 
-            // Si aún hay demasiados, remover los más antiguos
-            if (toRemove.size() < (localCache.size() - MAX_CACHE_SIZE + 10)) {
-                List<Map.Entry<UUID, Long>> sortedByAge = new ArrayList<>(lastSyncTime.entrySet());
-                sortedByAge.sort(Map.Entry.comparingByValue());
-
-                int additionalToRemove = (localCache.size() - MAX_CACHE_SIZE + 10) - toRemove.size();
-                for (int i = 0; i < Math.min(additionalToRemove, sortedByAge.size()); i++) {
-                    UUID oldId = sortedByAge.get(i).getKey();
-                    PlayerBackpacks backpacks = localCache.get(oldId);
-                    if (backpacks == null || !backpacks.isDirty()) {
-                        toRemove.add(oldId);
-                    }
-                }
-            }
-
-            // Ejecutar limpieza
-            for (UUID playerId : toRemove) {
+            // Limitar cuánto removemos de una vez
+            int maxToRemove = Math.min(toRemove.size(), MAX_CACHE_SIZE / 4);
+            for (int i = 0; i < maxToRemove; i++) {
+                UUID playerId = toRemove.get(i);
                 localCache.remove(playerId);
                 lastSyncTime.remove(playerId);
             }
 
-            if (!toRemove.isEmpty()) {
-                BackpacksMod.LOGGER.info("Cleaned " + toRemove.size() + " entries from cache");
+            if (maxToRemove > 0) {
+                BackpacksMod.LOGGER.debug("Cleaned " + maxToRemove + " entries from cache gracefully");
             }
 
         } catch (Exception e) {
-            BackpacksMod.LOGGER.error("Error in aggressive cache cleanup", e);
+            BackpacksMod.LOGGER.error("Error in graceful cache cleanup", e);
         }
     }
 
-    // CORREGIDO: Cierre seguro con timeout
+    // CORREGIDO: Cierre más robusto
     public void close() {
         BackpacksMod.LOGGER.info("Iniciando cierre de MongoDB...");
         isShuttingDown.set(true);
 
         try {
-            // Esperar a que terminen las operaciones activas
+            // Esperar operaciones activas con timeout más largo
             long waitStart = System.currentTimeMillis();
             while (activeOperations.get() > 0 &&
-                    (System.currentTimeMillis() - waitStart) < 5000) {
-                Thread.sleep(100);
+                    (System.currentTimeMillis() - waitStart) < 15000) { // 15 segundos
+                Thread.sleep(500);
             }
 
-            // Guardado final rápido
+            // Guardado final con más tiempo
             saveAllDirtyBackpacks();
 
             // Cerrar executor
             mongoExecutor.shutdown();
-            if (!mongoExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
+            if (!mongoExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
                 mongoExecutor.shutdownNow();
             }
 
@@ -320,7 +330,7 @@ public class MongoBackpackManager {
         }
     }
 
-    // Resto de métodos sin cambios significativos pero con verificaciones de shutdown
+    // CORREGIDO: getPlayerBackpacks más tolerante
     public PlayerBackpacks getPlayerBackpacks(UUID playerId) {
         if (isShuttingDown.get()) {
             return getCachedOrEmpty(playerId);
@@ -334,8 +344,16 @@ public class MongoBackpackManager {
 
         if (needsReload) {
             try {
-                backpacks = loadPlayerBackpacks(playerId).get(2, TimeUnit.SECONDS); // Timeout reducido
+                // Timeout más permisivo para carga síncrona
+                backpacks = loadPlayerBackpacks(playerId).get(10, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                BackpacksMod.LOGGER.warn("Load timeout for player " + playerId + ", using cache");
+                if (backpacks == null) {
+                    backpacks = new PlayerBackpacks();
+                    updateCache(playerId, backpacks);
+                }
             } catch (Exception e) {
+                BackpacksMod.LOGGER.warn("Error loading player " + playerId + ": " + e.getMessage());
                 if (backpacks == null) {
                     backpacks = new PlayerBackpacks();
                     updateCache(playerId, backpacks);
@@ -359,7 +377,7 @@ public class MongoBackpackManager {
         if (isShuttingDown.get()) return;
 
         try {
-            cleanupCacheAggressively();
+            cleanupCacheGracefully();
         } catch (Exception e) {
             BackpacksMod.LOGGER.error("Error in cleanup", e);
         }
@@ -372,6 +390,7 @@ public class MongoBackpackManager {
         PlayerBackpacks backpacks = getPlayerBackpacks(playerId);
         try {
             backpacks.addBackpack(id, name, slots);
+            // Guardado asíncrono no bloqueante
             savePlayerBackpacks(playerId, backpacks);
         } catch (IllegalStateException e) {
             throw new RuntimeException("Límite de mochilas alcanzado");
@@ -383,6 +402,7 @@ public class MongoBackpackManager {
 
         PlayerBackpacks backpacks = getPlayerBackpacks(playerId);
         backpacks.removeBackpack(id);
+        // Guardado asíncrono no bloqueante
         savePlayerBackpacks(playerId, backpacks);
     }
 

@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Wrapper optimizado para el MongoBackpackManager
- * Versión 3.1.0 - Completamente internacionalizado
+ * Versión 3.1.0 - SIN sistema de backups para máximo rendimiento
  */
 public class BackpackManager {
 
@@ -27,10 +27,7 @@ public class BackpackManager {
      */
     public static void addBackpack(UUID playerId, int id, String name, int slots) {
         BackpacksMod.getMongoManager().addBackpack(playerId, id, name, slots);
-
-        if (BackpacksMod.getBackupManager() != null) {
-            BackpacksMod.getBackupManager().markPlayerActivity(playerId);
-        }
+        // ELIMINADO: markPlayerActivity para backup
     }
 
     public static void addBackpack(UUID playerId, int id, String name) {
@@ -57,10 +54,7 @@ public class BackpackManager {
      */
     public static void removeBackpack(UUID playerId, int id) {
         BackpacksMod.getMongoManager().removeBackpack(playerId, id);
-
-        if (BackpacksMod.getBackupManager() != null) {
-            BackpacksMod.getBackupManager().markPlayerActivity(playerId);
-        }
+        // ELIMINADO: markPlayerActivity para backup
     }
 
     /**
@@ -75,10 +69,7 @@ public class BackpackManager {
      */
     public static void markBackpackDirty(UUID playerId) {
         BackpacksMod.getMongoManager().markBackpackDirty(playerId);
-
-        if (BackpacksMod.getBackupManager() != null) {
-            BackpacksMod.getBackupManager().markPlayerActivity(playerId);
-        }
+        // ELIMINADO: markPlayerActivity para backup
     }
 
     /**
@@ -115,7 +106,7 @@ public class BackpackManager {
     }
 
     /**
-     * Manejo de conexión de jugador - ACTUALIZADO con mensajes internacionalizados
+     * Manejo de conexión de jugador - OPTIMIZADO sin backups
      */
     public static void onPlayerJoin(ServerPlayerEntity player) {
         UUID playerId = player.getUuid();
@@ -130,46 +121,38 @@ public class BackpackManager {
                     int backpackCount = backpacks.getAllBackpacks().size();
 
                     if (backpackCount > 0) {
-                        // ACTUALIZADO: Usar sistema de idiomas
                         LanguageManager.sendMessage(player, "dataLoadedWithCount", backpackCount);
                     }
                 })
                 .exceptionally(throwable -> {
-                    // ACTUALIZADO: Usar sistema de idiomas
                     LanguageManager.sendMessage(player, "errorLoadingRetry");
                     return null;
                 });
     }
 
     /**
-     * Manejo de desconexión
+     * Manejo de desconexión - OPTIMIZADO sin backups
      */
     public static void onPlayerLeave(ServerPlayerEntity player) {
         UUID playerId = player.getUuid();
 
         try {
-            // Guardado asíncrono con timeout
+            // Guardado asíncrono con timeout reducido (sin presión de backups)
             CompletableFuture<Void> saveTask = forcePlayerSave(playerId);
 
-            // Esperar máximo 3 segundos
-            saveTask.orTimeout(3, TimeUnit.SECONDS)
+            // Esperar máximo 5 segundos (más tiempo sin backup)
+            saveTask.orTimeout(5, TimeUnit.SECONDS)
                     .whenComplete((result, throwable) -> {
                         if (throwable != null) {
-                            // Backup de emergencia solo si falla el guardado
-                            if (BackpacksMod.getBackupManager() != null) {
-                                BackpacksMod.getBackupManager().createManualBackup(
-                                        "Player disconnect save failed: " + player.getName().getString());
-                            }
+                            BackpacksMod.LOGGER.warn("Failed to save data for player " + player.getName().getString() + " on disconnect");
+                            // ELIMINADO: Emergency backup - solo log warning
                         }
                     });
 
-            // Marcar actividad para backup
-            if (BackpacksMod.getBackupManager() != null && ConfigManager.getConfig().backupOnPlayerDisconnect) {
-                BackpacksMod.getBackupManager().markPlayerActivity(playerId);
-            }
+            // ELIMINADO: markPlayerActivity para backup
 
         } catch (Exception e) {
-            // Error handling sin logging innecesario
+            BackpacksMod.LOGGER.warn("Error during player disconnect save for " + player.getName().getString());
         }
     }
 

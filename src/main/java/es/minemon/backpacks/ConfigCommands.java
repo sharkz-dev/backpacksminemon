@@ -26,19 +26,13 @@ public class ConfigCommands {
                 .then(CommandManager.literal("show")
                         .executes(ConfigCommands::showConfig))
 
-                // CONFIGURACIÓN BÁSICA
+                // CONFIGURACIÓN BÁSICA (SIN BACKUP)
                 .then(CommandManager.literal("set")
                         .then(CommandManager.literal("max-backpacks")
                                 .then(CommandManager.argument("value", IntegerArgumentType.integer(1, 150))
                                         .executes(ctx -> setConfigInt(ctx, "maxBackpacksPerPlayer", "value"))))
 
-                        .then(CommandManager.literal("backup-interval")
-                                .then(CommandManager.argument("minutes", IntegerArgumentType.integer(5, 60))
-                                        .executes(ctx -> setConfigInt(ctx, "backupIntervalMinutes", "minutes"))))
-
-                        .then(CommandManager.literal("max-backup-files")
-                                .then(CommandManager.argument("count", IntegerArgumentType.integer(10, 200))
-                                        .executes(ctx -> setConfigInt(ctx, "maxBackupFiles", "count"))))
+                        // ELIMINADO: backup-interval y max-backup-files
 
                         .then(CommandManager.literal("admin-permission")
                                 .then(CommandManager.argument("level", IntegerArgumentType.integer(1, 4))
@@ -83,7 +77,7 @@ public class ConfigCommands {
             LanguageManager.reloadLanguage();
 
             context.getSource().sendFeedback(() ->
-                            Text.literal("§aConfiguración recargada correctamente"),
+                            Text.literal("§aConfiguración recargada correctamente (SIN backups)"),
                     true);
             return 1;
         } catch (Exception e) {
@@ -99,7 +93,7 @@ public class ConfigCommands {
             BackpackConfig config = ConfigManager.getConfig();
             StringBuilder summary = new StringBuilder();
 
-            summary.append("§6=== Configuración BackpacksMod ===\n");
+            summary.append("§6=== Configuración BackpacksMod (SIN BACKUPS) ===\n");
             summary.append("§eServidor: §a").append(config.serverId).append("\n");
             summary.append("§eMax mochilas/jugador: §a").append(config.maxBackpacksPerPlayer).append("\n");
             summary.append("§eRenombrado: §a").append(config.allowBackpackRename ? "Habilitado" : "Deshabilitado").append("\n");
@@ -107,7 +101,9 @@ public class ConfigCommands {
             summary.append("§eComando principal: §a/").append(config.mainCommand).append("\n");
             summary.append("§eComando jugador: §a/").append(config.playerCommand).append("\n");
             summary.append("§eMongoDB: §a").append(config.databaseName).append("\n");
-            summary.append("§eBackup: cada §a").append(config.backupIntervalMinutes).append(" minutos\n");
+            // ELIMINADO: Información de backup
+            summary.append("§eSistema de backup: §cDESHABILITADO para rendimiento\n");
+            summary.append("§ePersistencia: §aSolo MongoDB\n");
 
             context.getSource().sendFeedback(() -> Text.literal(summary.toString()), false);
             return 1;
@@ -202,6 +198,7 @@ public class ConfigCommands {
         }
     }
 
+    // ACTUALIZADO: Método setConfigInt sin referencias a backup
     private static int setConfigInt(CommandContext<ServerCommandSource> context, String field, String argName) {
         try {
             int value = IntegerArgumentType.getInteger(context, argName);
@@ -209,9 +206,8 @@ public class ConfigCommands {
 
             switch (field) {
                 case "maxBackpacksPerPlayer" -> config.maxBackpacksPerPlayer = value;
-                case "backupIntervalMinutes" -> config.backupIntervalMinutes = value;
-                case "maxBackupFiles" -> config.maxBackupFiles = value;
                 case "adminPermissionLevel" -> config.adminPermissionLevel = value;
+                // ELIMINADO: casos de backup
                 default -> throw new IllegalArgumentException("Campo desconocido: " + field);
             }
 
@@ -287,7 +283,7 @@ public class ConfigCommands {
 
             if (isValid) {
                 context.getSource().sendFeedback(() ->
-                                Text.literal("§aConfiguración válida"),
+                                Text.literal("§aConfiguración válida (optimizada sin backups)"),
                         false);
             } else {
                 context.getSource().sendFeedback(() ->

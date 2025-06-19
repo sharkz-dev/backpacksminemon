@@ -347,12 +347,9 @@ public class BackpackAdminEditScreenHandler extends GenericContainerScreenHandle
                         }
                     });
 
-            if (BackpacksMod.getBackupManager() != null) {
-                String playerName = targetPlayer.getName().getString();
-                BackpacksMod.getBackupManager().createManualBackup(
-                        "Admin " + admin.getName().getString() + " edited backpack " + backpackId +
-                                " of player " + playerName);
-            }
+            // ELIMINADO: Backup manual - solo logging
+            BackpacksMod.LOGGER.info("Admin " + admin.getName().getString() + " edited backpack " + backpackId +
+                    " of player " + targetPlayer.getName().getString());
         }
 
         super.onClosed(player);

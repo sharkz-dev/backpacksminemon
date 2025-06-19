@@ -1,4 +1,4 @@
-// SIMPLIFICADO: BackpacksMod.java - SIN sistema de backups
+// OPTIMIZADO: BackpacksMod.java - SIN sistema de backups
 package es.minemon.backpacks;
 
 import net.fabricmc.api.DedicatedServerModInitializer;
