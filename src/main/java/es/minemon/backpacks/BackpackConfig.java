@@ -1,17 +1,17 @@
+// SIMPLIFICADO: BackpackConfig.java - SIN sistema de backups
 package es.minemon.backpacks;
 
 import java.util.Map;
 
 /**
- * Configuración simplificada del mod BackpacksMod
- * Los mensajes ahora se manejan en LanguageManager
- * ACTUALIZADO: Límite aumentado, VIP customizable y mochilas por defecto
+ * Configuración simplificada SIN sistema de backups
+ * Solo MongoDB para persistencia de datos
  */
 public class BackpackConfig {
 
     // === CONFIGURACIÓN BÁSICA (USUARIO) ===
     public String serverId = "default-server";
-    public int maxBackpacksPerPlayer = 75; // AUMENTADO: De 50 a 75 para permitir VIP + normales
+    public int maxBackpacksPerPlayer = 75;
     public boolean allowBackpackRename = true;
     public boolean showBackpackStats = true;
 
@@ -24,23 +24,17 @@ public class BackpackConfig {
     public String databaseName = "minecraft_backpacks";
     public int mongoConnectionTimeoutMs = 10000;
 
-    // === CONFIGURACIÓN DE BACKUP (USUARIO) ===
-    public int backupIntervalMinutes = 10;
-    public int maxBackupFiles = 50;
-    public String backupDirectory = "backpacks_backup";
-
     // === CONFIGURACIÓN DE PERMISOS (USUARIO) ===
     public int adminPermissionLevel = 2;
 
-    // === NUEVO: CONFIGURACIÓN DE MOCHILAS POR DEFECTO ===
+    // === CONFIGURACIÓN DE MOCHILAS POR DEFECTO ===
     public boolean giveDefaultBackpacks = true;
     public int defaultBackpackCount = 3;
     public String defaultBackpackNamePattern = "My Backpack %d";
     public int defaultBackpackSlots = 27;
     public String defaultBackpackIcon = "minecraft:chest";
 
-    // === NUEVO: CONFIGURACIÓN VIP CUSTOMIZABLE ===
-    // Rangos VIP con configuración completa
+    // === CONFIGURACIÓN VIP CUSTOMIZABLE ===
     public VipRankConfig cristalConfig = new VipRankConfig(
             "Cristal Storage", "%s %02d", 3, 27, "minecraft:light_blue_stained_glass",
             "#b3e5fc", "#81d4fa", true
@@ -71,10 +65,10 @@ public class BackpackConfig {
     public final String collectionName = "player_backpacks";
     public final boolean mongoAutoReconnect = true;
 
-    public final boolean enableBackupSystem = true;
-    public final boolean createEmergencyBackup = true;
-    public final boolean backupOnPlayerDisconnect = true;
-    public final String emergencyBackupDirectory = "backpacks_emergency";
+    // ELIMINADO: Todo lo relacionado con backups
+    // public final boolean enableBackupSystem = false;
+    // public final boolean createEmergencyBackup = false;
+    // etc...
 
     public final int backpackSlots = 27;
     public final boolean autoSaveOnClose = true;
@@ -101,7 +95,7 @@ public class BackpackConfig {
 
     public static class VipRankConfig {
         public String displayName;
-        public String namePattern; // %s será reemplazado por displayName, %d por número
+        public String namePattern;
         public int backpackCount;
         public int slotsPerBackpack;
         public String defaultIcon;
@@ -139,18 +133,12 @@ public class BackpackConfig {
     }
 
     public void validateUserConfig() {
-        // ACTUALIZADO: Nuevo rango de límite para permitir VIP
         if (maxBackpacksPerPlayer < 10 || maxBackpacksPerPlayer > 150) {
-            maxBackpacksPerPlayer = 75; // Nuevo valor por defecto
+            maxBackpacksPerPlayer = 75;
         }
 
-        if (backupIntervalMinutes < 5 || backupIntervalMinutes > 60) {
-            backupIntervalMinutes = 10;
-        }
-
-        if (maxBackupFiles < 10 || maxBackupFiles > 200) {
-            maxBackupFiles = 50;
-        }
+        // ELIMINADO: Validaciones de backup
+        // if (backupIntervalMinutes < 5 || backupIntervalMinutes > 60) ...
 
         if (mongoConnectionTimeoutMs < 5000 || mongoConnectionTimeoutMs > 30000) {
             mongoConnectionTimeoutMs = 10000;
@@ -172,9 +160,7 @@ public class BackpackConfig {
             databaseName = "minecraft_backpacks";
         }
 
-        if (backupDirectory == null || backupDirectory.trim().isEmpty()) {
-            backupDirectory = "backpacks_backup";
-        }
+        // ELIMINADO: Validación de directorios de backup
 
         if (mainCommand == null || mainCommand.trim().isEmpty() || !isValidCommand(mainCommand)) {
             mainCommand = "backpack";
@@ -188,19 +174,11 @@ public class BackpackConfig {
             playerCommand = mainCommand + "s";
         }
 
-        // NUEVO: Validar configuración de mochilas por defecto
         validateDefaultBackpackConfig();
-
-        // NUEVO: Validar configuración VIP
         validateVipConfigs();
-
-        // NUEVO: Validar que el límite sea compatible con VIP
         validateVipCompatibility();
     }
 
-    /**
-     * NUEVO: Valida la configuración de mochilas por defecto
-     */
     private void validateDefaultBackpackConfig() {
         if (defaultBackpackCount < 0 || defaultBackpackCount > 10) {
             defaultBackpackCount = 3;
@@ -219,9 +197,6 @@ public class BackpackConfig {
         }
     }
 
-    /**
-     * NUEVO: Valida las configuraciones VIP
-     */
     private void validateVipConfigs() {
         validateVipRankConfig(cristalConfig, "Cristal Storage", 3);
         validateVipRankConfig(rubyConfig, "Ruby Vault", 5);
@@ -260,22 +235,14 @@ public class BackpackConfig {
         }
     }
 
-    /**
-     * NUEVO: Valida que la configuración actual sea compatible con el sistema VIP
-     */
     private void validateVipCompatibility() {
-        // Obtener el máximo de mochilas VIP posibles con la configuración actual
         int maxVipBackpacks = getMaxPossibleVipBackpacks();
-
-        // Necesitamos al menos 15 slots para mochilas normales + por defecto
         int minRequiredLimit = maxVipBackpacks + Math.max(15, defaultBackpackCount + 5);
 
         if (maxBackpacksPerPlayer < minRequiredLimit) {
             BackpacksMod.LOGGER.warn("Current backpack limit (" + maxBackpacksPerPlayer +
                     ") may not be sufficient for VIP system + default backpacks (requires at least " + minRequiredLimit + ")");
-            BackpacksMod.LOGGER.warn("Consider increasing maxBackpacksPerPlayer to " + minRequiredLimit + " or higher");
 
-            // Auto-ajustar si está muy por debajo
             if (maxBackpacksPerPlayer < 60) {
                 maxBackpacksPerPlayer = Math.max(75, minRequiredLimit);
                 BackpacksMod.LOGGER.info("Auto-adjusted maxBackpacksPerPlayer to " + maxBackpacksPerPlayer + " for VIP compatibility");
@@ -283,9 +250,6 @@ public class BackpackConfig {
         }
     }
 
-    /**
-     * NUEVO: Obtiene el máximo de mochilas VIP posibles con la configuración actual
-     */
     public int getMaxPossibleVipBackpacks() {
         int total = 0;
         if (cristalConfig.enabled) total += cristalConfig.backpackCount;
@@ -300,23 +264,22 @@ public class BackpackConfig {
         return command.matches("[a-zA-Z0-9_-]+") && command.length() <= 20;
     }
 
+    // SIMPLIFICADO: Summary sin información de backups
     public String getFullConfigSummary() {
         validateUserConfig();
 
         StringBuilder summary = new StringBuilder();
-        summary.append("§6=== BackpacksMod Configuration ===\n");
+        summary.append("§6=== BackpacksMod Configuration (NO BACKUPS) ===\n");
         summary.append("§eUser Configuration:\n");
         summary.append("  §7Server ID: §a").append(serverId).append("\n");
         summary.append("  §7Max backpacks/player: §a").append(maxBackpacksPerPlayer).append("\n");
 
-        // NUEVO: Mostrar información de mochilas por defecto
         summary.append("  §7Default backpacks: §a").append(giveDefaultBackpacks ? "Enabled" : "Disabled").append("\n");
         if (giveDefaultBackpacks) {
             summary.append("  §7Default count: §a").append(defaultBackpackCount).append("\n");
             summary.append("  §7Default slots: §a").append(defaultBackpackSlots).append("\n");
         }
 
-        // NUEVO: Mostrar información VIP
         int maxVipBackpacks = getMaxPossibleVipBackpacks();
         boolean vipCompatible = isVipConfigurationValid();
         summary.append("  §7VIP System: §a").append(vipCompatible ? "Compatible" : "⚠ May have issues").append("\n");
@@ -328,8 +291,11 @@ public class BackpackConfig {
         summary.append("  §7Player command: §a/").append(playerCommand).append("\n");
         summary.append("  §7MongoDB: §a").append(mongoConnectionString).append("\n");
         summary.append("  §7Database: §a").append(databaseName).append("\n");
-        summary.append("  §7Backup interval: §a").append(backupIntervalMinutes).append(" min\n");
-        summary.append("  §7Max backup files: §a").append(maxBackupFiles).append("\n");
+
+        // ELIMINADO: Información de backup
+        summary.append("  §7Backup system: §cDISABLED for performance\n");
+        summary.append("  §7Data persistence: §aMongoDB only\n");
+
         summary.append("  §7Admin permission level: §a").append(adminPermissionLevel).append("\n");
 
         summary.append("\n§eLanguage System:\n");
@@ -350,20 +316,22 @@ public class BackpackConfig {
         summary.append("  §7Limit compatibility: §a").append(vipCompatible ? "✓ Good" : "⚠ Check limits").append("\n");
         summary.append("  §7Normal backpack space: §a").append(Math.max(0, maxBackpacksPerPlayer - maxVipBackpacks)).append(" slots\n");
 
-        summary.append("\n§eFixed Configuration (Optimized):\n");
+        summary.append("\n§eFixed Configuration (Performance Optimized):\n");
         summary.append("  §7Auto-save on close: §aEnabled (Critical)\n");
         summary.append("  §7Async operations: §aEnabled (Performance)\n");
         summary.append("  §7Cache timeout: §a").append(cacheTimeoutSeconds).append("s (Optimized)\n");
         summary.append("  §7Default slots: §a").append(backpackSlots).append(" (Standard)\n");
         summary.append("  §7Custom icons: §aEnabled (Functionality)\n");
-        summary.append("  §7Emergency backup: §aEnabled (Security)\n");
+        summary.append("  §7Backup system: §cDISABLED (Maximum Performance)\n");
+        summary.append("  §7Emergency backup: §cDISABLED\n");
         summary.append("  §7Data integrity validation: §aEnabled (Security)\n");
 
         return summary.toString();
     }
 
+    // SIMPLIFICADO: Command info sin backups
     public String getCommandInfo() {
-        return String.format("§6=== Command Configuration ===\n" +
+        return String.format("§6=== Command Configuration (No Backups) ===\n" +
                         "§eMain command (admin): §a/%s\n" +
                         "§7- /%s give <player> <name> <slots>\n" +
                         "§7- /%s remove <player> <id>\n" +
@@ -386,6 +354,11 @@ public class BackpackConfig {
                         "§7- Auto-give on join: §a%s\n" +
                         "§7- Default count: §a%d\n" +
                         "§7- Default slots: §a%d\n" +
+                        "\n§eData Storage:\n" +
+                        "§7- Primary storage: §aMongoDB\n" +
+                        "§7- Backup system: §cDISABLED\n" +
+                        "§7- Emergency backup: §cDISABLED\n" +
+                        "§7- Performance impact: §aMINIMAL\n" +
                         "\n§eLanguage:\n" +
                         "§7- All messages in: §aconfig/backpacks/lang.json\n" +
                         "§7- Current: §a%s\n" +
@@ -402,16 +375,13 @@ public class BackpackConfig {
                 LanguageManager.getLanguageInfo(), mainCommand);
     }
 
-    /**
-     * NUEVO: Obtiene información específica sobre la configuración VIP
-     */
     public String getVipConfigInfo() {
         int maxVipBackpacks = getMaxPossibleVipBackpacks();
         boolean isCompatible = isVipConfigurationValid();
         int remainingSlots = Math.max(0, maxBackpacksPerPlayer - maxVipBackpacks);
 
         StringBuilder info = new StringBuilder();
-        info.append("§6=== VIP Configuration Status ===\n");
+        info.append("§6=== VIP Configuration Status (No Backups) ===\n");
         info.append("§eBackpack Limits:\n");
         info.append("  §7• Total limit per player: §a").append(maxBackpacksPerPlayer).append("\n");
         info.append("  §7• Max possible VIP backpacks: §a").append(maxVipBackpacks).append("\n");
@@ -444,12 +414,14 @@ public class BackpackConfig {
             info.append("\n§aConfiguration is optimal for VIP system!\n");
         }
 
+        info.append("\n§ePerformance Notes:\n");
+        info.append("  §7• Backup system disabled for maximum performance\n");
+        info.append("  §7• All data persisted to MongoDB only\n");
+        info.append("  §7• Reduced memory and CPU overhead\n");
+
         return info.toString();
     }
 
-    /**
-     * NUEVO: Verifica si la configuración VIP es válida
-     */
     public boolean isVipConfigurationValid() {
         int maxVipBackpacks = getMaxPossibleVipBackpacks();
         int requiredSpace = maxVipBackpacks + Math.max(10, defaultBackpackCount);

@@ -1,3 +1,4 @@
+// CORREGIDO: BackupManager.java
 package es.minemon.backpacks;
 
 import com.google.gson.Gson;
@@ -16,10 +17,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class BackupManager {
     private final MongoBackpackManager mongoManager;
@@ -27,16 +27,33 @@ public class BackupManager {
     private final Path backupPath;
     private final Path emergencyPath;
 
-    private int tickCounter = 0;
-    private final Map<UUID, Long> lastPlayerActivity = new ConcurrentHashMap<>();
+    private final AtomicInteger tickCounter = new AtomicInteger(0);
+    private final ConcurrentHashMap<UUID, Long> lastPlayerActivity = new ConcurrentHashMap<>();
     private final Set<UUID> playersWithChanges = ConcurrentHashMap.newKeySet();
 
-    // Pool de hilos para operaciones de backup
-    private final ExecutorService backupExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "Backup-Worker");
-        t.setDaemon(true);
-        return t;
-    });
+    // CORREGIDO: Pool de hilos con límites estrictos y timeouts
+    private final ExecutorService backupExecutor = new ThreadPoolExecutor(
+            1, // Solo un hilo core
+            2, // Max 2 hilos
+            60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(10), // Cola pequeña
+            r -> {
+                Thread t = new Thread(r, "Backup-Worker-" + System.nanoTime());
+                t.setDaemon(true);
+                t.setUncaughtExceptionHandler((thread, ex) -> {
+                    BackpacksMod.LOGGER.error("Uncaught exception in backup thread: " + thread.getName(), ex);
+                });
+                return t;
+            },
+            new ThreadPoolExecutor.DiscardOldestPolicy() // Descartar backups antiguos si está lleno
+    );
+
+    private final AtomicBoolean isShuttingDown = new AtomicBoolean(false);
+    private final AtomicBoolean backupInProgress = new AtomicBoolean(false);
+
+    // Timeouts más agresivos
+    private static final long BACKUP_TIMEOUT = 30000; // 30 segundos max por backup
+    private static final long EMERGENCY_BACKUP_TIMEOUT = 10000; // 10 segundos para emergencia
 
     public BackupManager(MongoBackpackManager mongoManager) {
         this.mongoManager = mongoManager;
@@ -52,116 +69,221 @@ public class BackupManager {
         try {
             Files.createDirectories(backupPath);
             Files.createDirectories(emergencyPath);
-            BackpacksMod.LOGGER.info("Sistema de backup inicializado");
+            BackpacksMod.LOGGER.info("Backup system initialized with strict timeouts");
         } catch (IOException e) {
-            BackpacksMod.LOGGER.error("Error creando directorios de backup", e);
+            BackpacksMod.LOGGER.error("Error creating backup directories", e);
         }
     }
 
     public void tick() {
-        tickCounter++;
+        if (isShuttingDown.get()) return;
 
+        int currentTick = tickCounter.incrementAndGet();
         int backupInterval = ConfigManager.getBackupIntervalTicks();
 
-        // Backup automático
-        if (tickCounter >= backupInterval) {
-            tickCounter = 0;
-            performScheduledBackup();
+        // Backup automático con verificación de estado
+        if (currentTick >= backupInterval) {
+            tickCounter.set(0);
+            if (!backupInProgress.get()) {
+                performScheduledBackup();
+            }
         }
 
-        // Auto-guardado optimizado
+        // Auto-guardado optimizado menos frecuente
         int autoSaveInterval = ConfigManager.getConfig().autoSaveIntervalSeconds * 20;
-        if (tickCounter % autoSaveInterval == 0) {
+        if (currentTick % (autoSaveInterval * 2) == 0) { // Menos frecuente
             saveActivePlayersChanges();
+        }
+
+        // Limpieza de tracking cada 5 minutos
+        if (currentTick % (20 * 60 * 5) == 0) {
+            cleanupOldActivity();
         }
     }
 
     public void markPlayerActivity(UUID playerId) {
+        if (isShuttingDown.get()) return;
+
         lastPlayerActivity.put(playerId, System.currentTimeMillis());
         playersWithChanges.add(playerId);
     }
 
-    // Optimización: backup asíncrono
+    // CORREGIDO: Backup programado con timeout y control de concurrencia
     private void performScheduledBackup() {
-        if (!ConfigManager.isFeatureEnabled("backup")) {
+        if (!ConfigManager.isFeatureEnabled("backup") || isShuttingDown.get()) {
+            return;
+        }
+
+        if (!backupInProgress.compareAndSet(false, true)) {
+            BackpacksMod.LOGGER.warn("Backup already in progress, skipping scheduled backup");
             return;
         }
 
         CompletableFuture.runAsync(() -> {
             try {
-                // Guardar datos sucios primero
-                mongoManager.saveAllDirtyBackpacks();
+                // Guardar datos sucios primero con timeout
+                CompletableFuture<Void> saveTask = CompletableFuture.runAsync(() -> {
+                    mongoManager.saveAllDirtyBackpacks();
+                }, backupExecutor);
 
-                // Crear backup completo
-                createFullBackup();
+                saveTask.get(10, TimeUnit.SECONDS); // Timeout para guardado
 
-                // Limpiar backups antiguos
+                // Crear backup completo con timeout
+                CompletableFuture<Void> backupTask = CompletableFuture.runAsync(() -> {
+                    try {
+                        createFullBackup();
+                    } catch (IOException e) {
+                        BackpacksMod.LOGGER.error("Error creating full backup", e);
+                    }
+                }, backupExecutor);
+
+                backupTask.get(BACKUP_TIMEOUT, TimeUnit.MILLISECONDS);
+
+                // Limpiar backups antiguos rápidamente
                 cleanOldBackups();
 
+            } catch (TimeoutException e) {
+                BackpacksMod.LOGGER.error("Backup timeout - backup may be incomplete");
             } catch (Exception e) {
-                BackpacksMod.LOGGER.error("Error durante backup automático", e);
+                BackpacksMod.LOGGER.error("Error during scheduled backup", e);
+            } finally {
+                backupInProgress.set(false);
             }
         }, backupExecutor);
     }
 
-    // Optimización: guardado más eficiente
+    // CORREGIDO: Guardado más eficiente con límites
     private void saveActivePlayersChanges() {
-        if (playersWithChanges.isEmpty()) return;
+        if (playersWithChanges.isEmpty() || isShuttingDown.get()) return;
 
-        CompletableFuture.runAsync(() -> {
-            Set<UUID> toSave = new HashSet<>(playersWithChanges);
-            playersWithChanges.clear();
+        // Limitar número de jugadores a procesar por vez
+        Set<UUID> toSave = new HashSet<>();
+        int maxToProcess = Math.min(10, playersWithChanges.size());
 
-            // Usar el método optimizado del mongoManager
-            mongoManager.saveAllDirtyBackpacks();
-        }, backupExecutor);
+        Iterator<UUID> iterator = playersWithChanges.iterator();
+        for (int i = 0; i < maxToProcess && iterator.hasNext(); i++) {
+            toSave.add(iterator.next());
+            iterator.remove();
+        }
+
+        if (!toSave.isEmpty()) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    mongoManager.saveAllDirtyBackpacks();
+                } catch (Exception e) {
+                    BackpacksMod.LOGGER.warn("Error in incremental save: " + e.getMessage());
+                }
+            }, backupExecutor).orTimeout(5, TimeUnit.SECONDS).exceptionally(ex -> {
+                BackpacksMod.LOGGER.warn("Save timeout during incremental save");
+                return null;
+            });
+        }
     }
 
+    // CORREGIDO: Backup de emergencia ultra-rápido
     public void performEmergencyBackup() {
-        if (!ConfigManager.getConfig().createEmergencyBackup) {
+        if (!ConfigManager.getConfig().createEmergencyBackup || isShuttingDown.get()) {
             return;
         }
 
         try {
-            BackpacksMod.LOGGER.info("Ejecutando backup de emergencia...");
+            BackpacksMod.LOGGER.info("Creating emergency backup...");
 
-            String timestamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date());
-            String filename = "emergency_backup_" + timestamp + ".json";
-            Path emergencyFile = emergencyPath.resolve(filename);
+            CompletableFuture<Void> emergencyTask = CompletableFuture.runAsync(() -> {
+                try {
+                    String timestamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date());
+                    String filename = "emergency_backup_" + timestamp + ".json";
+                    Path emergencyFile = emergencyPath.resolve(filename);
 
-            Map<UUID, MongoBackpackManager.PlayerBackpacks> allData = mongoManager.getAllCachedBackpacks();
+                    // Solo obtener datos del cache - NO cargar desde MongoDB
+                    Map<UUID, MongoBackpackManager.PlayerBackpacks> cachedData = mongoManager.getAllCachedBackpacks();
 
-            JsonObject emergencyData = new JsonObject();
-            emergencyData.addProperty("timestamp", System.currentTimeMillis());
-            emergencyData.addProperty("server_shutdown", true);
-            emergencyData.addProperty("server_id", ConfigManager.getConfig().serverId);
-            emergencyData.addProperty("total_players", allData.size());
+                    JsonObject emergencyData = new JsonObject();
+                    emergencyData.addProperty("timestamp", System.currentTimeMillis());
+                    emergencyData.addProperty("server_shutdown", true);
+                    emergencyData.addProperty("server_id", ConfigManager.getConfig().serverId);
+                    emergencyData.addProperty("total_players", cachedData.size());
+                    emergencyData.addProperty("emergency", true);
 
-            JsonObject playersData = new JsonObject();
-            for (Map.Entry<UUID, MongoBackpackManager.PlayerBackpacks> entry : allData.entrySet()) {
-                JsonObject playerData = serializePlayerBackpacks(entry.getValue());
-                playersData.add(entry.getKey().toString(), playerData);
-            }
+                    // Serialización mínima para velocidad
+                    JsonObject playersData = new JsonObject();
+                    for (Map.Entry<UUID, MongoBackpackManager.PlayerBackpacks> entry : cachedData.entrySet()) {
+                        try {
+                            JsonObject playerData = serializePlayerBackpacksMinimal(entry.getValue());
+                            playersData.add(entry.getKey().toString(), playerData);
+                        } catch (Exception e) {
+                            // Skip problematic players
+                        }
+                    }
 
-            emergencyData.add("players", playersData);
+                    emergencyData.add("players", playersData);
 
-            // Escribir archivo de emergencia
-            try (FileWriter writer = new FileWriter(emergencyFile.toFile())) {
-                gson.toJson(emergencyData, writer);
-            }
+                    // Escribir archivo de emergencia
+                    try (FileWriter writer = new FileWriter(emergencyFile.toFile())) {
+                        gson.toJson(emergencyData, writer);
+                    }
 
-            BackpacksMod.LOGGER.info("Backup de emergencia guardado en: " + emergencyFile);
+                    BackpacksMod.LOGGER.info("Emergency backup saved: " + emergencyFile);
 
+                } catch (Exception e) {
+                    BackpacksMod.LOGGER.error("Error during emergency backup", e);
+                }
+            }, backupExecutor);
+
+            // Timeout muy corto para emergencia
+            emergencyTask.get(EMERGENCY_BACKUP_TIMEOUT, TimeUnit.MILLISECONDS);
+
+        } catch (TimeoutException e) {
+            BackpacksMod.LOGGER.error("Emergency backup timeout - server may lose some data");
         } catch (Exception e) {
-            BackpacksMod.LOGGER.error("Error durante backup de emergencia", e);
+            BackpacksMod.LOGGER.error("Error during emergency backup", e);
         }
     }
 
+    // NUEVO: Serialización mínima para backup de emergencia
+    private JsonObject serializePlayerBackpacksMinimal(MongoBackpackManager.PlayerBackpacks playerBackpacks) {
+        JsonObject playerData = new JsonObject();
+        JsonObject backpacksData = new JsonObject();
+
+        try {
+            for (Map.Entry<Integer, MongoBackpackManager.BackpackData> entry : playerBackpacks.getAllBackpacks().entrySet()) {
+                JsonObject backpackData = new JsonObject();
+                MongoBackpackManager.BackpackData backpack = entry.getValue();
+
+                backpackData.addProperty("name", backpack.getName());
+                backpackData.addProperty("slots", backpack.getInventory().size());
+
+                // Solo contar items, no serializar completamente
+                int itemCount = 0;
+                for (ItemStack stack : backpack.getInventory()) {
+                    if (!stack.isEmpty()) {
+                        itemCount++;
+                    }
+                }
+                backpackData.addProperty("item_count", itemCount);
+                backpackData.addProperty("emergency_backup", true);
+
+                backpacksData.add(String.valueOf(entry.getKey()), backpackData);
+            }
+
+            playerData.add("backpacks", backpacksData);
+            playerData.addProperty("last_activity", lastPlayerActivity.getOrDefault(UUID.randomUUID(), System.currentTimeMillis()));
+            return playerData;
+        } catch (Exception e) {
+            // Return minimal data
+            JsonObject minimal = new JsonObject();
+            minimal.addProperty("error", "serialization_failed");
+            return minimal;
+        }
+    }
+
+    // CORREGIDO: Creación de backup completo con timeout
     private void createFullBackup() throws IOException {
         String timestamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date());
         String filename = "backup_" + timestamp + ".json";
         Path backupFile = backupPath.resolve(filename);
 
+        // Solo datos del cache para evitar bloqueos de MongoDB
         Map<UUID, MongoBackpackManager.PlayerBackpacks> allData = mongoManager.getAllCachedBackpacks();
 
         JsonObject backupData = new JsonObject();
@@ -169,12 +291,17 @@ public class BackupManager {
         backupData.addProperty("backup_type", "scheduled");
         backupData.addProperty("server_id", ConfigManager.getConfig().serverId);
         backupData.addProperty("total_players", allData.size());
-        backupData.addProperty("config_version", "2.2.0");
+        backupData.addProperty("config_version", "3.1.0");
 
         JsonObject playersData = new JsonObject();
         for (Map.Entry<UUID, MongoBackpackManager.PlayerBackpacks> entry : allData.entrySet()) {
-            JsonObject playerData = serializePlayerBackpacks(entry.getValue());
-            playersData.add(entry.getKey().toString(), playerData);
+            try {
+                JsonObject playerData = serializePlayerBackpacks(entry.getValue());
+                playersData.add(entry.getKey().toString(), playerData);
+            } catch (Exception e) {
+                BackpacksMod.LOGGER.warn("Skipping player " + entry.getKey() + " due to serialization error");
+                // Skip problematic players instead of failing entire backup
+            }
         }
 
         backupData.add("players", playersData);
@@ -182,55 +309,76 @@ public class BackupManager {
         try (FileWriter writer = new FileWriter(backupFile.toFile())) {
             gson.toJson(backupData, writer);
         }
+
+        BackpacksMod.LOGGER.info("Full backup created: " + backupFile);
     }
 
-    // Serialización optimizada
+    // CORREGIDO: Serialización optimizada con timeout
     private JsonObject serializePlayerBackpacks(MongoBackpackManager.PlayerBackpacks playerBackpacks) {
         JsonObject playerData = new JsonObject();
         JsonObject backpacksData = new JsonObject();
 
-        for (Map.Entry<Integer, MongoBackpackManager.BackpackData> entry : playerBackpacks.getAllBackpacks().entrySet()) {
-            JsonObject backpackData = new JsonObject();
-            MongoBackpackManager.BackpackData backpack = entry.getValue();
+        try {
+            for (Map.Entry<Integer, MongoBackpackManager.BackpackData> entry : playerBackpacks.getAllBackpacks().entrySet()) {
+                try {
+                    JsonObject backpackData = new JsonObject();
+                    MongoBackpackManager.BackpackData backpack = entry.getValue();
 
-            backpackData.addProperty("name", backpack.getName());
-            backpackData.addProperty("slots", backpack.getInventory().size());
+                    backpackData.addProperty("name", backpack.getName());
+                    backpackData.addProperty("slots", backpack.getInventory().size());
 
-            // Serializar solo items no vacíos
-            JsonObject itemsData = new JsonObject();
-            DefaultedList<ItemStack> inventory = backpack.getInventory();
+                    // Serializar solo items no vacíos con limit
+                    JsonObject itemsData = new JsonObject();
+                    DefaultedList<ItemStack> inventory = backpack.getInventory();
+                    int itemsSerialized = 0;
+                    int maxItemsToSerialize = 100; // Límite para evitar bloqueos
 
-            for (int i = 0; i < inventory.size(); i++) {
-                ItemStack stack = inventory.get(i);
-                if (stack.isEmpty()) continue; // Saltar items vacíos
+                    for (int i = 0; i < inventory.size() && itemsSerialized < maxItemsToSerialize; i++) {
+                        ItemStack stack = inventory.get(i);
+                        if (stack.isEmpty()) continue;
 
-                JsonObject itemData = new JsonObject();
-                MinecraftServer server = BackpacksMod.getServer();
-                if (server != null) {
-                    try {
-                        NbtCompound nbt = new NbtCompound();
-                        stack.encode(server.getRegistryManager(), nbt);
+                        JsonObject itemData = new JsonObject();
+                        MinecraftServer server = BackpacksMod.getServer();
+                        if (server != null) {
+                            try {
+                                NbtCompound nbt = new NbtCompound();
+                                stack.encode(server.getRegistryManager(), nbt);
 
-                        itemData.addProperty("nbt", nbt.toString());
-                        itemData.addProperty("slot", i);
-                        itemData.addProperty("count", stack.getCount());
-                        itemData.addProperty("item_id", stack.getItem().toString());
-                        itemsData.add(String.valueOf(i), itemData);
-                    } catch (Exception e) {
-                        // Silencioso - saltar item problemático
+                                itemData.addProperty("nbt", nbt.toString());
+                                itemData.addProperty("slot", i);
+                                itemData.addProperty("count", stack.getCount());
+                                itemData.addProperty("item_id", stack.getItem().toString());
+                                itemsData.add(String.valueOf(i), itemData);
+                                itemsSerialized++;
+                            } catch (Exception e) {
+                                // Skip problematic items
+                            }
+                        }
                     }
+
+                    backpackData.add("items", itemsData);
+                    backpackData.addProperty("items_serialized", itemsSerialized);
+                    backpacksData.add(String.valueOf(entry.getKey()), backpackData);
+
+                } catch (Exception e) {
+                    BackpacksMod.LOGGER.warn("Error serializing backpack " + entry.getKey());
+                    // Skip problematic backpack
                 }
             }
 
-            backpackData.add("items", itemsData);
-            backpacksData.add(String.valueOf(entry.getKey()), backpackData);
-        }
+            playerData.add("backpacks", backpacksData);
+            playerData.addProperty("last_activity", lastPlayerActivity.getOrDefault(UUID.randomUUID(), System.currentTimeMillis()));
+            return playerData;
 
-        playerData.add("backpacks", backpacksData);
-        playerData.addProperty("last_activity", lastPlayerActivity.getOrDefault(UUID.randomUUID(), System.currentTimeMillis()));
-        return playerData;
+        } catch (Exception e) {
+            BackpacksMod.LOGGER.error("Error serializing player backpacks", e);
+            JsonObject errorData = new JsonObject();
+            errorData.addProperty("error", "serialization_failed");
+            return errorData;
+        }
     }
 
+    // CORREGIDO: Limpieza más rápida
     private void cleanOldBackups() {
         try {
             BackpackConfig config = ConfigManager.getConfig();
@@ -243,16 +391,43 @@ public class BackupManager {
 
                 int toDelete = backupFiles.length - config.maxBackupFiles;
                 for (int i = 0; i < toDelete; i++) {
-                    backupFiles[i].delete();
+                    if (backupFiles[i].delete()) {
+                        BackpacksMod.LOGGER.debug("Deleted old backup: " + backupFiles[i].getName());
+                    }
                 }
             }
 
         } catch (Exception e) {
-            BackpacksMod.LOGGER.error("Error limpiando backups antiguos", e);
+            BackpacksMod.LOGGER.warn("Error cleaning old backups: " + e.getMessage());
         }
     }
 
+    // NUEVO: Limpieza de actividad antigua
+    private void cleanupOldActivity() {
+        if (isShuttingDown.get()) return;
+
+        try {
+            long cutoff = System.currentTimeMillis() - (30 * 60 * 1000); // 30 minutos
+            lastPlayerActivity.entrySet().removeIf(entry -> entry.getValue() < cutoff);
+
+            // Limpiar jugadores con cambios que ya no están activos
+            playersWithChanges.removeIf(playerId -> {
+                Long lastActivity = lastPlayerActivity.get(playerId);
+                return lastActivity == null || lastActivity < cutoff;
+            });
+
+        } catch (Exception e) {
+            BackpacksMod.LOGGER.warn("Error cleaning old activity: " + e.getMessage());
+        }
+    }
+
+    // CORREGIDO: Backup manual con timeout
     public void createManualBackup(String reason) {
+        if (isShuttingDown.get()) {
+            BackpacksMod.LOGGER.warn("Cannot create manual backup during shutdown");
+            return;
+        }
+
         CompletableFuture.runAsync(() -> {
             try {
                 String timestamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date());
@@ -270,8 +445,12 @@ public class BackupManager {
 
                 JsonObject playersData = new JsonObject();
                 for (Map.Entry<UUID, MongoBackpackManager.PlayerBackpacks> entry : allData.entrySet()) {
-                    JsonObject playerData = serializePlayerBackpacks(entry.getValue());
-                    playersData.add(entry.getKey().toString(), playerData);
+                    try {
+                        JsonObject playerData = serializePlayerBackpacks(entry.getValue());
+                        playersData.add(entry.getKey().toString(), playerData);
+                    } catch (Exception e) {
+                        // Skip problematic players
+                    }
                 }
 
                 backupData.add("players", playersData);
@@ -280,41 +459,107 @@ public class BackupManager {
                     gson.toJson(backupData, writer);
                 }
 
-                BackpacksMod.LOGGER.info("Backup manual creado: " + backupFile + " (Razón: " + reason + ")");
+                BackpacksMod.LOGGER.info("Manual backup created: " + backupFile + " (Reason: " + reason + ")");
 
             } catch (Exception e) {
-                BackpacksMod.LOGGER.error("Error creando backup manual", e);
+                BackpacksMod.LOGGER.error("Error creating manual backup", e);
             }
-        }, backupExecutor);
+        }, backupExecutor).orTimeout(BACKUP_TIMEOUT, TimeUnit.MILLISECONDS).exceptionally(ex -> {
+            BackpacksMod.LOGGER.error("Manual backup timeout");
+            return null;
+        });
     }
 
     public List<String> getAvailableBackups() {
         List<String> backups = new ArrayList<>();
 
-        File[] backupFiles = backupPath.toFile().listFiles((dir, name) ->
-                name.endsWith(".json"));
+        try {
+            File[] backupFiles = backupPath.toFile().listFiles((dir, name) ->
+                    name.endsWith(".json"));
 
-        if (backupFiles != null) {
-            Arrays.sort(backupFiles, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            if (backupFiles != null) {
+                Arrays.sort(backupFiles, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
 
-            for (File file : backupFiles) {
-                backups.add(file.getName());
+                for (File file : backupFiles) {
+                    backups.add(file.getName());
+                }
             }
+        } catch (Exception e) {
+            BackpacksMod.LOGGER.warn("Error listing backups: " + e.getMessage());
         }
 
         return backups;
     }
 
-    // Método para cerrar recursos
+    // CORREGIDO: Shutdown seguro con timeout
     public void shutdown() {
+        BackpacksMod.LOGGER.info("Shutting down BackupManager...");
+        isShuttingDown.set(true);
+
         try {
-            backupExecutor.shutdown();
-            if (!backupExecutor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                backupExecutor.shutdownNow();
+            // Esperar que termine el backup actual
+            long waitStart = System.currentTimeMillis();
+            while (backupInProgress.get() && (System.currentTimeMillis() - waitStart) < 5000) {
+                Thread.sleep(100);
             }
+
+            // Shutdown executor con timeout
+            backupExecutor.shutdown();
+            if (!backupExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
+                List<Runnable> pending = backupExecutor.shutdownNow();
+                if (!pending.isEmpty()) {
+                    BackpacksMod.LOGGER.warn("Cancelled " + pending.size() + " pending backup tasks");
+                }
+            }
+
+            // Limpiar datos
+            lastPlayerActivity.clear();
+            playersWithChanges.clear();
+
+            BackpacksMod.LOGGER.info("BackupManager shut down successfully");
+
         } catch (InterruptedException e) {
             backupExecutor.shutdownNow();
             Thread.currentThread().interrupt();
+            BackpacksMod.LOGGER.warn("Interrupted during backup shutdown");
+        } catch (Exception e) {
+            BackpacksMod.LOGGER.error("Error during backup shutdown", e);
+        }
+    }
+
+    // NUEVO: Método para verificar estado del sistema
+    public boolean isHealthy() {
+        return !isShuttingDown.get() &&
+                !backupExecutor.isShutdown() &&
+                !backupInProgress.get();
+    }
+
+    // NUEVO: Estadísticas del backup manager
+    public String getBackupStats() {
+        try {
+            File[] backupFiles = backupPath.toFile().listFiles((dir, name) -> name.endsWith(".json"));
+            int backupCount = backupFiles != null ? backupFiles.length : 0;
+
+            return String.format("Backups: %d, Active players: %d, Pending changes: %d, Status: %s",
+                    backupCount,
+                    lastPlayerActivity.size(),
+                    playersWithChanges.size(),
+                    isHealthy() ? "Healthy" : "Issues");
+        } catch (Exception e) {
+            return "Error getting stats: " + e.getMessage();
+        }
+    }
+
+    // NUEVO: Forzar limpieza de memoria
+    public void forceCleanup() {
+        if (!isShuttingDown.get()) {
+            cleanupOldActivity();
+            cleanOldBackups();
+
+            // Sugerir GC si hay mucha actividad
+            if (lastPlayerActivity.size() > 100) {
+                System.gc();
+            }
         }
     }
 }

@@ -1,3 +1,4 @@
+// SIMPLIFICADO: BackpacksMod.java - SIN sistema de backups
 package es.minemon.backpacks;
 
 import net.fabricmc.api.DedicatedServerModInitializer;
@@ -10,75 +11,114 @@ import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
 public class BackpacksMod implements DedicatedServerModInitializer {
 	public static final String MOD_ID = "backpacks";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	private static MinecraftServer server;
 	private static MongoBackpackManager mongoManager;
-	private static BackupManager backupManager;
+	// ELIMINADO: BackupManager completamente removido
 
-	private static int cacheCleanupCounter = 0;
-	private static final int CACHE_CLEANUP_INTERVAL = 24000; // 20 minutos (optimizado)
+	// Control de estado simplificado
+	private static final AtomicBoolean isFullyReady = new AtomicBoolean(false);
+	private static final AtomicBoolean isShuttingDown = new AtomicBoolean(false);
+	private static final AtomicInteger healthCheckCounter = new AtomicInteger(0);
+
+	// Contadores optimizados (solo cache cleanup)
+	private static final AtomicInteger cacheCleanupCounter = new AtomicInteger(0);
+	private static final int CACHE_CLEANUP_INTERVAL = 36000; // 30 minutos
+	private static final int HEALTH_CHECK_INTERVAL = 12000; // 10 minutos
 
 	@Override
 	public void onInitializeServer() {
-		LOGGER.info("Iniciando BackpacksMod v3.1.0 - Sistema Optimizado con Soporte de Consola");
+		LOGGER.info("Iniciando BackpacksMod v3.1.0 - Optimizado SIN backups");
 
-		// Inicializar componentes esenciales
 		try {
-			LanguageManager.initialize();
-			ConfigManager.initialize();
+			// Inicializar componentes esenciales con timeout
+			CompletableFuture<Void> initTask = CompletableFuture.runAsync(() -> {
+				try {
+					LanguageManager.initialize();
+					ConfigManager.initialize();
+					LOGGER.info("Configuration initialized successfully");
+				} catch (Exception e) {
+					LOGGER.error("Critical error initializing configuration", e);
+					throw new RuntimeException("Configuration initialization failed", e);
+				}
+			});
+
+			initTask.get(10, TimeUnit.SECONDS);
+
 		} catch (Exception e) {
-			LOGGER.error("Error inicializando configuración", e);
-			throw new RuntimeException("No se pudo inicializar la configuración", e);
+			LOGGER.error("Failed to initialize core components", e);
+			throw new RuntimeException("Core initialization failed", e);
 		}
 
-		// MongoDB
+		// SOLO MongoDB - sin backups
 		if (ConfigManager.isFeatureEnabled("mongodb")) {
 			try {
 				mongoManager = new MongoBackpackManager();
-				LOGGER.info("MongoDB inicializado");
+				LOGGER.info("MongoDB initialized with performance optimizations");
 			} catch (Exception e) {
-				LOGGER.error("Error inicializando MongoDB", e);
-				throw new RuntimeException("No se pudo inicializar MongoDB", e);
+				LOGGER.error("MongoDB initialization failed", e);
+				throw new RuntimeException("MongoDB is required but failed to initialize", e);
 			}
 		}
 
-		// Backup
-		if (ConfigManager.isFeatureEnabled("backup") && mongoManager != null) {
-			backupManager = new BackupManager(mongoManager);
+		// Sistema de sincronización
+		try {
+			BackpackSyncManager.initialize();
+			LOGGER.info("Sync system initialized");
+		} catch (Exception e) {
+			LOGGER.error("Sync system initialization failed", e);
+			throw new RuntimeException("Sync system is required", e);
 		}
 
-		// Sistema de sincronización
-		BackpackSyncManager.initialize();
-
-		// Registrar comandos principales únicamente
-		CommandRegistrationCallback.EVENT.register(BackpackCommands::register);
-		CommandRegistrationCallback.EVENT.register(ConfigCommands::register);
-		CommandRegistrationCallback.EVENT.register(VipCommands::register);
-		CommandRegistrationCallback.EVENT.register(PermissionCommands::register);
-
-		// NUEVO: Registrar comando de ayuda para consola
-		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-			BackpackCommands.registerConsoleHelp(dispatcher);
-		});
+		// Registrar comandos
+		try {
+			CommandRegistrationCallback.EVENT.register(BackpackCommands::register);
+			CommandRegistrationCallback.EVENT.register(ConfigCommands::register);
+			CommandRegistrationCallback.EVENT.register(VipCommands::register);
+			CommandRegistrationCallback.EVENT.register(PermissionCommands::register);
+			CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+				BackpackCommands.registerConsoleHelp(dispatcher);
+			});
+			LOGGER.info("Commands registered successfully");
+		} catch (Exception e) {
+			LOGGER.error("Command registration failed", e);
+		}
 
 		// Eventos
-		PlayerEventsHandler.register();
-		BackpackRenameManager.register();
+		try {
+			PlayerEventsHandler.register();
+			BackpackRenameManager.register();
+			LOGGER.info("Event handlers registered");
+		} catch (Exception e) {
+			LOGGER.error("Event handler registration failed", e);
+		}
 
 		// Networking
-		registerNetworking();
+		try {
+			registerNetworking();
+			LOGGER.info("Networking registered");
+		} catch (Exception e) {
+			LOGGER.error("Networking registration failed", e);
+		}
+
 		registerServerEvents();
 
-		LOGGER.info("BackpacksMod v3.1.0 inicializado con soporte completo para consola");
-
-		// Mensaje informativo para consola
+		LOGGER.info("BackpacksMod v3.1.0 initialized successfully WITHOUT backup system");
 		LOGGER.info("=== CONSOLE USAGE ===");
 		LOGGER.info("Use '{}' commands from console for administration", ConfigManager.getConfig().mainCommand);
-		LOGGER.info("Example: {} give <player> <name> <slots>", ConfigManager.getConfig().mainCommand);
 		LOGGER.info("Type '{}-help' for full console command list", ConfigManager.getConfig().mainCommand);
+		LOGGER.info("=== PERFORMANCE NOTES ===");
+		LOGGER.info("• Backup system DISABLED for maximum performance");
+		LOGGER.info("• All data relies on MongoDB persistence");
+		LOGGER.info("• Reduced memory usage and CPU overhead");
 		LOGGER.info("==================");
 	}
 
@@ -92,7 +132,7 @@ public class BackpacksMod implements DedicatedServerModInitializer {
 			ServerPlayNetworking.registerGlobalReceiver(BackpackNetworking.ChangeIconPayload.ID, BackpackNetworking::handleChangeIcon);
 			ServerPlayNetworking.registerGlobalReceiver(BackpackNetworking.RenameBackpackPayload.ID, BackpackNetworking::handleRenameBackpack);
 		} catch (Exception e) {
-			LOGGER.error("Error inicializando networking", e);
+			LOGGER.error("Error registering networking", e);
 		}
 	}
 
@@ -102,71 +142,116 @@ public class BackpacksMod implements DedicatedServerModInitializer {
 
 			try {
 				LuckPermsManager.initialize();
-				LOGGER.info("Sistema de permisos: " + LuckPermsManager.getPermissionSystemInfo());
+				LOGGER.info("Permission system: " + LuckPermsManager.getPermissionSystemInfo());
 
-				// Mensaje adicional para administradores
+				isFullyReady.set(true);
+
 				LOGGER.info("=== ADMINISTRATION INFO ===");
 				LOGGER.info("Console has full administrative privileges");
-				LOGGER.info("All console actions are logged automatically");
-				LOGGER.info("Use console commands for server automation");
+				LOGGER.info("NO backup system - data relies on MongoDB only");
+				LOGGER.info("Health monitoring active every 10 minutes");
 				LOGGER.info("==========================");
 
 			} catch (Exception e) {
-				LOGGER.error("Error inicializando permisos", e);
+				LOGGER.error("Error initializing permissions", e);
 			}
 		});
 
+		// SIMPLIFICADO: Shutdown solo con MongoDB
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+			LOGGER.info("Server stopping - saving data to MongoDB...");
+			isShuttingDown.set(true);
+			isFullyReady.set(false);
+
 			try {
-				LOGGER.info("Cerrando BackpacksMod - guardando datos...");
+				// 1. Parar sincronización
+				CompletableFuture<Void> syncShutdown = CompletableFuture.runAsync(() -> {
+					try {
+						BackpackSyncManager.shutdown();
+						LOGGER.info("Sync system shut down");
+					} catch (Exception e) {
+						LOGGER.error("Error shutting down sync system", e);
+					}
+				});
 
-				BackpackSyncManager.shutdown();
-				if (mongoManager != null) {
-					mongoManager.saveAllDirtyBackpacks();
-				}
-				if (backupManager != null && ConfigManager.getConfig().createEmergencyBackup) {
-					backupManager.performEmergencyBackup();
-				}
+				// 2. Guardar datos MongoDB (MÁS TIEMPO SIN BACKUPS)
+				CompletableFuture<Void> mongoSave = CompletableFuture.runAsync(() -> {
+					if (mongoManager != null) {
+						try {
+							mongoManager.saveAllDirtyBackpacks();
+							LOGGER.info("All data saved to MongoDB");
+						} catch (Exception e) {
+							LOGGER.error("Error saving MongoDB data", e);
+						}
+					}
+				});
 
-				LOGGER.info("BackpacksMod cerrado correctamente");
+				// Más tiempo para guardado sin presión de backups
+				CompletableFuture.allOf(syncShutdown, mongoSave)
+						.get(15, TimeUnit.SECONDS); // Más tiempo
+
+				LOGGER.info("Graceful shutdown completed - data saved to MongoDB");
+
 			} catch (Exception e) {
-				LOGGER.error("Error durante cierre", e);
+				LOGGER.error("Error during graceful shutdown", e);
 			}
 		});
 
+		// Cleanup final simplificado
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
 			try {
-				if (backupManager != null) {
-					backupManager.shutdown();
-				}
-				if (mongoManager != null) {
-					mongoManager.close();
-				}
-				BackpacksMod.server = null;
+				CompletableFuture<Void> finalCleanup = CompletableFuture.runAsync(() -> {
+					try {
+						if (mongoManager != null) {
+							mongoManager.close();
+						}
+						BackpacksMod.server = null;
+						LOGGER.info("MongoDB connection closed");
+					} catch (Exception e) {
+						LOGGER.error("Error in final cleanup", e);
+					}
+				});
 
-				LOGGER.info("Recursos de BackpacksMod liberados");
+				finalCleanup.get(5, TimeUnit.SECONDS);
+
 			} catch (Exception e) {
-				LOGGER.error("Error liberando recursos", e);
+				LOGGER.error("Error during final cleanup", e);
 			}
 		});
 
-		// Tick optimizado - limpieza menos frecuente
+		// SIMPLIFICADO: Tick sin backup manager
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
-			try {
-				if (backupManager != null) {
-					backupManager.tick();
-				}
+			if (isShuttingDown.get() || !isFullyReady.get()) {
+				return;
+			}
 
-				// Limpieza de cache cada 20 minutos
-				cacheCleanupCounter++;
-				if (cacheCleanupCounter >= CACHE_CLEANUP_INTERVAL) {
-					cacheCleanupCounter = 0;
+			try {
+				// Solo cache cleanup - NO backup ticks
+				int cacheCount = cacheCleanupCounter.incrementAndGet();
+				if (cacheCount >= CACHE_CLEANUP_INTERVAL) {
+					cacheCleanupCounter.set(0);
 					if (mongoManager != null) {
-						mongoManager.cleanupInactiveCache();
+						CompletableFuture.runAsync(() -> {
+							try {
+								mongoManager.cleanupInactiveCache();
+							} catch (Exception e) {
+								LOGGER.warn("Error in cache cleanup: " + e.getMessage());
+							}
+						});
 					}
 				}
+
+				// Health check simplificado
+				int healthCount = healthCheckCounter.incrementAndGet();
+				if (healthCount >= HEALTH_CHECK_INTERVAL) {
+					healthCheckCounter.set(0);
+					performSimplifiedHealthCheck();
+				}
+
 			} catch (Exception e) {
-				// Error silencioso para evitar spam
+				if (Math.random() < 0.001) {
+					LOGGER.warn("Error in server tick: " + e.getMessage());
+				}
 			}
 		});
 	}
@@ -180,76 +265,154 @@ public class BackpacksMod implements DedicatedServerModInitializer {
 		return mongoManager;
 	}
 
-	public static BackupManager getBackupManager() {
-		return backupManager;
-	}
+	// ELIMINADO: getBackupManager() - ya no existe
 
 	public static boolean isFullyInitialized() {
-		return server != null && mongoManager != null && ConfigManager.getConfig() != null;
+		return isFullyReady.get() && server != null && mongoManager != null && ConfigManager.getConfig() != null;
 	}
 
-	// Método de emergencia simplificado con logging mejorado
+	public static boolean isShuttingDown() {
+		return isShuttingDown.get();
+	}
+
+	// SIMPLIFICADO: Emergency save solo MongoDB
 	public static void emergencySave(String reason) {
-		try {
-			LOGGER.warn("=== EMERGENCY SAVE TRIGGERED ===");
-			LOGGER.warn("Reason: {}", reason);
-
-			if (mongoManager != null) {
-				mongoManager.saveAllDirtyBackpacks();
-				LOGGER.info("Emergency save: MongoDB data saved");
-			}
-			if (backupManager != null) {
-				backupManager.createManualBackup("Emergency: " + reason);
-				LOGGER.info("Emergency save: Backup created");
-			}
-
-			LOGGER.warn("=== EMERGENCY SAVE COMPLETED ===");
-		} catch (Exception e) {
-			LOGGER.error("Error en guardado de emergencia", e);
-		}
-	}
-
-	// NUEVOS: Métodos de utilidad para administración desde consola
-
-	/**
-	 * Ejecuta comando administrativo desde consola de forma segura
-	 */
-	public static void executeConsoleCommand(String command) {
-		if (server == null) {
-			LOGGER.error("Server not initialized, cannot execute console command: {}", command);
+		if (isShuttingDown.get()) {
+			LOGGER.warn("Cannot perform emergency save during shutdown");
 			return;
 		}
 
+		LOGGER.warn("=== EMERGENCY SAVE TO MONGODB ===");
+		LOGGER.warn("Reason: {}", reason);
+
 		try {
-			server.getCommandManager().executeWithPrefix(server.getCommandSource(), command);
-			LOGGER.info("Console command executed: {}", command);
+			CompletableFuture<Void> emergencyTask = CompletableFuture.runAsync(() -> {
+				try {
+					if (mongoManager != null) {
+						mongoManager.saveAllDirtyBackpacks();
+						LOGGER.info("Emergency save: All data saved to MongoDB");
+					}
+				} catch (Exception e) {
+					LOGGER.error("Error in emergency save", e);
+				}
+			});
+
+			emergencyTask.get(20, TimeUnit.SECONDS); // Más tiempo sin backups
+			LOGGER.warn("=== EMERGENCY SAVE COMPLETED ===");
+
 		} catch (Exception e) {
-			LOGGER.error("Error executing console command '{}': {}", command, e.getMessage());
+			LOGGER.error("Emergency save failed or timed out", e);
 		}
 	}
 
-	/**
-	 * Obtiene estadísticas del servidor para logging
-	 */
+	// SIMPLIFICADO: Health check sin backup system
+	public static void performSimplifiedHealthCheck() {
+		if (isShuttingDown.get()) return;
+
+		try {
+			StringBuilder healthReport = new StringBuilder();
+			healthReport.append("=== SIMPLIFIED HEALTH CHECK ===\n");
+
+			boolean allHealthy = true;
+			int issues = 0;
+
+			// MongoDB health
+			if (mongoManager == null) {
+				healthReport.append("❌ MongoDB: Not initialized\n");
+				allHealthy = false;
+				issues++;
+			} else {
+				boolean hasPendingWrites = mongoManager.hasPendingWrites();
+				if (hasPendingWrites) {
+					healthReport.append("⚠️ MongoDB: Has pending writes\n");
+				} else {
+					healthReport.append("✅ MongoDB: Healthy\n");
+				}
+			}
+
+			// Memory health
+			Runtime runtime = Runtime.getRuntime();
+			long totalMemory = runtime.totalMemory();
+			long freeMemory = runtime.freeMemory();
+			long usedMemory = totalMemory - freeMemory;
+			double memoryUsagePercent = (double) usedMemory / totalMemory * 100;
+
+			if (memoryUsagePercent > 90) {
+				healthReport.append("❌ Memory: Critical usage (").append(String.format("%.1f", memoryUsagePercent)).append("%)\n");
+				allHealthy = false;
+				issues++;
+			} else if (memoryUsagePercent > 75) {
+				healthReport.append("⚠️ Memory: High usage (").append(String.format("%.1f", memoryUsagePercent)).append("%)\n");
+			} else {
+				healthReport.append("✅ Memory: Normal usage (").append(String.format("%.1f", memoryUsagePercent)).append("%)\n");
+			}
+
+			// VIP system health
+			try {
+				boolean vipValid = VipBackpackManager.isVipConfigurationValid();
+				if (vipValid) {
+					healthReport.append("✅ VIP System: Configuration valid\n");
+				} else {
+					healthReport.append("⚠️ VIP System: Configuration issues\n");
+				}
+			} catch (Exception e) {
+				healthReport.append("❌ VIP System: Error checking\n");
+				issues++;
+			}
+
+			// Overall status
+			healthReport.append("=== STATUS: ");
+			if (allHealthy && issues == 0) {
+				healthReport.append("HEALTHY (NO BACKUPS) ===");
+				LOGGER.info(healthReport.toString());
+			} else if (issues < 2) {
+				healthReport.append("MINOR ISSUES ===");
+				LOGGER.warn(healthReport.toString());
+			} else {
+				healthReport.append("ISSUES DETECTED ===");
+				LOGGER.error(healthReport.toString());
+
+				// Limpieza automática si hay problemas
+				if (memoryUsagePercent > 90) {
+					LOGGER.warn("Performing emergency cleanup...");
+					System.gc();
+					if (mongoManager != null) {
+						mongoManager.cleanupInactiveCache();
+					}
+				}
+			}
+
+		} catch (Exception e) {
+			LOGGER.error("Error during simplified health check", e);
+		}
+	}
+
+	// SIMPLIFICADO: Stats sin backup info
 	public static String getServerStats() {
 		try {
 			StringBuilder stats = new StringBuilder();
-			stats.append("BackpacksMod Server Statistics:\n");
+			stats.append("BackpacksMod Server Statistics (NO BACKUPS):\n");
 			stats.append("- Server ID: ").append(ConfigManager.getConfig().serverId).append("\n");
+			stats.append("- Status: ").append(isFullyReady.get() ? "Ready" : "Not Ready").append("\n");
 			stats.append("- Max backpacks per player: ").append(ConfigManager.getConfig().maxBackpacksPerPlayer).append("\n");
 			stats.append("- Language messages: ").append(LanguageManager.getTotalMessages()).append("\n");
 			stats.append("- Permission system: ").append(LuckPermsManager.getPermissionSystemInfo()).append("\n");
 			stats.append("- VIP system: ").append(VipBackpackManager.isVipConfigurationValid() ? "Compatible" : "Issues detected").append("\n");
 
-			if (backupManager != null) {
-				var backups = backupManager.getAvailableBackups();
-				stats.append("- Available backups: ").append(backups.size()).append("\n");
-			}
+			// Memory info
+			Runtime runtime = Runtime.getRuntime();
+			long totalMemory = runtime.totalMemory();
+			long freeMemory = runtime.freeMemory();
+			long usedMemory = totalMemory - freeMemory;
+			stats.append("- Memory usage: ").append(String.format("%.1f", (double) usedMemory / totalMemory * 100)).append("%\n");
 
 			if (mongoManager != null) {
 				stats.append("- MongoDB: Connected\n");
 				stats.append("- Pending writes: ").append(mongoManager.hasPendingWrites() ? "Yes" : "No").append("\n");
 			}
+
+			stats.append("- Backup system: DISABLED for performance\n");
+			stats.append("- Data persistence: MongoDB only\n");
 
 			return stats.toString();
 		} catch (Exception e) {
@@ -257,97 +420,68 @@ public class BackpacksMod implements DedicatedServerModInitializer {
 		}
 	}
 
-	/**
-	 * Logs las estadísticas del servidor (útil para monitoreo)
-	 */
-	public static void logServerStats() {
-		LOGGER.info("\n" + getServerStats());
-	}
-
-	/**
-	 * Verifica la salud del sistema y reporta problemas
-	 */
-	public static void performHealthCheck() {
-		StringBuilder healthReport = new StringBuilder();
-		healthReport.append("=== BACKPACKS HEALTH CHECK ===\n");
-
-		boolean allHealthy = true;
-
-		// Verificar MongoDB
-		if (mongoManager == null) {
-			healthReport.append("❌ MongoDB: Not initialized\n");
-			allHealthy = false;
-		} else {
-			healthReport.append("✅ MongoDB: Connected\n");
+	// SIMPLIFICADO: Cleanup solo para MongoDB
+	public static void forceSystemCleanup(String reason) {
+		if (isShuttingDown.get()) {
+			LOGGER.warn("Cannot perform cleanup during shutdown");
+			return;
 		}
 
-		// Verificar sistema de backup
-		if (backupManager == null) {
-			healthReport.append("❌ Backup System: Not initialized\n");
-			allHealthy = false;
-		} else {
-			try {
-				var backups = backupManager.getAvailableBackups();
-				if (backups.isEmpty()) {
-					healthReport.append("⚠️ Backup System: No backups available\n");
-				} else {
-					healthReport.append("✅ Backup System: ").append(backups.size()).append(" backups available\n");
+		LOGGER.info("Forcing system cleanup: {}", reason);
+
+		try {
+			CompletableFuture<Void> cleanupTask = CompletableFuture.runAsync(() -> {
+				try {
+					System.gc();
+
+					if (mongoManager != null) {
+						mongoManager.cleanupInactiveCache();
+					}
+
+					LOGGER.info("System cleanup completed (no backup system)");
+				} catch (Exception e) {
+					LOGGER.error("Error during system cleanup", e);
 				}
-			} catch (Exception e) {
-				healthReport.append("❌ Backup System: Error accessing backups\n");
-				allHealthy = false;
-			}
-		}
+			});
 
-		// Verificar sistema de idiomas
-		try {
-			int messages = LanguageManager.getTotalMessages();
-			if (messages < 50) {
-				healthReport.append("⚠️ Language System: Low message count (").append(messages).append(")\n");
-			} else {
-				healthReport.append("✅ Language System: ").append(messages).append(" messages loaded\n");
-			}
+			cleanupTask.get(10, TimeUnit.SECONDS);
+
 		} catch (Exception e) {
-			healthReport.append("❌ Language System: Error\n");
-			allHealthy = false;
-		}
-
-		// Verificar sistema VIP
-		try {
-			boolean vipValid = VipBackpackManager.isVipConfigurationValid();
-			if (vipValid) {
-				healthReport.append("✅ VIP System: Configuration valid\n");
-			} else {
-				healthReport.append("⚠️ VIP System: Configuration issues detected\n");
-			}
-		} catch (Exception e) {
-			healthReport.append("❌ VIP System: Error checking configuration\n");
-			allHealthy = false;
-		}
-
-		// Verificar permisos
-		try {
-			String permSystem = LuckPermsManager.getPermissionSystemInfo();
-			healthReport.append("✅ Permissions: ").append(permSystem).append("\n");
-		} catch (Exception e) {
-			healthReport.append("❌ Permissions: Error\n");
-			allHealthy = false;
-		}
-
-		healthReport.append("=== HEALTH STATUS: ").append(allHealthy ? "HEALTHY" : "ISSUES DETECTED").append(" ===");
-
-		if (allHealthy) {
-			LOGGER.info(healthReport.toString());
-		} else {
-			LOGGER.warn(healthReport.toString());
+			LOGGER.error("System cleanup failed or timed out", e);
 		}
 	}
 
-	/**
-	 * Programa verificación de salud automática cada 30 minutos
-	 */
-	public static void scheduleHealthChecks() {
-		// Esta función podría expandirse para programar verificaciones automáticas
-		LOGGER.info("Health check system initialized - manual checks available");
+	// Performance metrics simplificados
+	public static String getPerformanceMetrics() {
+		try {
+			StringBuilder metrics = new StringBuilder();
+			metrics.append("=== Performance Metrics (No Backups) ===\n");
+
+			// Thread info
+			java.lang.management.ThreadMXBean threadBean =
+					java.lang.management.ManagementFactory.getThreadMXBean();
+			metrics.append("Active threads: ").append(threadBean.getThreadCount()).append("\n");
+
+			// Memory info
+			Runtime runtime = Runtime.getRuntime();
+			long totalMemory = runtime.totalMemory();
+			long freeMemory = runtime.freeMemory();
+			long usedMemory = totalMemory - freeMemory;
+
+			metrics.append("Memory used: ").append(usedMemory / 1024 / 1024).append(" MB\n");
+			metrics.append("Memory usage: ").append(String.format("%.1f", (double) usedMemory / totalMemory * 100)).append("%\n");
+
+			// MongoDB status
+			if (mongoManager != null) {
+				metrics.append("MongoDB pending writes: ").append(mongoManager.hasPendingWrites() ? "Yes" : "No").append("\n");
+			}
+
+			metrics.append("Backup system: DISABLED\n");
+			metrics.append("Performance impact: MINIMAL\n");
+
+			return metrics.toString();
+		} catch (Exception e) {
+			return "Error getting performance metrics: " + e.getMessage();
+		}
 	}
 }
