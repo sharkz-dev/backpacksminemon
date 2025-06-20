@@ -188,54 +188,12 @@ public class BackpackScreenHandler extends GenericContainerScreenHandler {
 
     @Override
     public ItemStack quickMove(PlayerEntity player, int slot) {
-        ItemStack result = ItemStack.EMPTY;
-
-        if (slot >= backpackInventory.size()) {
-            ItemStack stackToMove = this.slots.get(slot).getStack();
-            if (stackToMove.isEmpty()) {
-                return ItemStack.EMPTY;
-            }
-
-            int maxSlot = backpackInventory.size();
-            if (hasBackButton()) {
-                maxSlot = backpackInventory.size() - 1;
-            }
-
-            for (int i = 0; i < maxSlot; i++) {
-                ItemStack backpackStack = backpackInventory.getStack(i);
-                if (backpackStack.isEmpty()) {
-                    backpackInventory.setStack(i, stackToMove.copy());
-                    stackToMove.setCount(0);
-                    markChangesAndNotify();
-                    return ItemStack.EMPTY;
-                } else if (ItemStack.areItemsAndComponentsEqual(backpackStack, stackToMove)) {
-                    int maxCount = Math.min(backpackStack.getMaxCount(), stackToMove.getMaxCount());
-                    int spaceAvailable = maxCount - backpackStack.getCount();
-                    if (spaceAvailable > 0) {
-                        int toMove = Math.min(spaceAvailable, stackToMove.getCount());
-                        backpackStack.increment(toMove);
-                        stackToMove.decrement(toMove);
-                        markChangesAndNotify();
-                        if (stackToMove.isEmpty()) {
-                            return ItemStack.EMPTY;
-                        }
-                    }
-                }
-            }
-            result = stackToMove;
-        } else {
-            ItemStack clickedStack = backpackInventory.getStack(slot);
-            var customData = clickedStack.getOrDefault(DataComponentTypes.CUSTOM_DATA, net.minecraft.component.type.NbtComponent.DEFAULT);
-
-            if (!clickedStack.isEmpty() && customData.copyNbt().contains("back_button")) {
-                return ItemStack.EMPTY;
-            }
-
-            result = super.quickMove(player, slot);
+        ItemStack itemStack = super.quickMove(player, slot);
+        if (itemStack != ItemStack.EMPTY) {
             markChangesAndNotify();
         }
 
-        return result;
+        return itemStack;
     }
 
     private boolean hasBackButton() {
